@@ -1,0 +1,2 @@
+export interface CreateItemDto { categoryId: number; imageId?: number | null; title: string; description?: string | null; price: number; }
+export interface UpdateItemDto { imageId?: number | null; title?: string; description?: string | null; price?: number; active?: boolean; }

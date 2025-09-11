@@ -11,7 +11,10 @@ import roleRouter from "./routes/roleRouter";
 import paymentRouter from "./routes/paymentRouter";
 import { loadSchemaLimits } from "./utils/schemaLimits";
 import { enableStrictMode } from "./utils/sqlStrictMode";
-
+import menuRouter from "./routes/menuRouter";
+import imageRouter from "./routes/imageRouter";
+import categoryRouter from "./routes/categoryRouter";
+import itemRouter from "./routes/itemRouter";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -25,7 +28,10 @@ app.use("/api/users", userRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/roles", roleRouter);
 app.use("/api/payments", paymentRouter);
-
+app.use("/api/menus", menuRouter);
+app.use("/api/images", imageRouter);
+app.use("/api/categories", categoryRouter);
+app.use("/api/items", itemRouter);
 
 
 async function initServer() {
