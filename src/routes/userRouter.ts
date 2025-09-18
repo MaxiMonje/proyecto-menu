@@ -4,6 +4,7 @@ import {
   getUserById,
   createUser,
   updateUser,
+  verifyResetToken,
   deleteUser,
   forgotPassword,
   restorePassword
@@ -29,5 +30,6 @@ router.delete("/:id", isAuthenticated,deleteUser);
 
 router.post("/forgot-password", validate(forgotPasswordSchema), forgotPassword);
 router.post("/restore-password", validate(restorePasswordSchema), restorePassword);
+router.get("/verify-reset-token/:token", verifyResetToken);
 
 export default router;

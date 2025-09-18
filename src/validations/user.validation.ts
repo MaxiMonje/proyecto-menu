@@ -27,7 +27,7 @@ export const forgotPasswordSchema = z.object({
 
 export const restorePasswordSchema = z
   .object({
-    email: z.string().email(),
+    
     password: z.string().trim().min(8).max(16),         // 👈 TRIM
     confirmationPassword: z.string().trim().min(8).max(16),
   })
