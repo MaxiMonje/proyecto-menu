@@ -11,6 +11,7 @@ export interface CreateMenuDto {
     logo?: string;
     backgroundImage?: string;
     color?: MenuColorDto;
+    puntosDeVenta?: string;
  }
 
 
@@ -20,4 +21,5 @@ export interface UpdateMenuDto {
     logo?: string;
     backgroundImage?: string;
     color?: MenuColorDto;
+    puntosDeVenta?: string;
 }

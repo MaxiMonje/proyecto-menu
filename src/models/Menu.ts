@@ -19,7 +19,7 @@ logo?: string | null;
 backgroundImage?: string | null;
 color?: MenuColor | null;
 
-
+puntosDeVenta?: string | null;
 createdAt?: Date;
 updatedAt?: Date;
 }
@@ -36,6 +36,7 @@ public active!: boolean;
 public logo!: string | null;
 public backgroundImage!: string | null;
 public color!: MenuColor | null;
+public puntosDeVenta!: string | null;
 public readonly createdAt!: Date;
 public readonly updatedAt!: Date;
 }
@@ -50,6 +51,7 @@ active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 logo: { type: DataTypes.STRING(255), allowNull: true, comment: "URL del logo" },
 backgroundImage: { type: DataTypes.STRING(255), allowNull: true, comment: "URL de imagen de fondo" },
 color: { type: DataTypes.JSON, allowNull: true, comment: "Objeto { primary, secondary } en HEX" },
+puntosDeVenta: { type: DataTypes.STRING(255), allowNull: true, comment: "Nombre o descripción de los puntos de venta" },
 },
 { sequelize, tableName: "menus", modelName: "Menu", timestamps: true }
 );
