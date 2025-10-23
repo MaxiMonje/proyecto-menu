@@ -9,7 +9,7 @@ const seedMenus = async () => {
       logo: "https://picsum.photos/seed/donpepe-logo/256/256",
       backgroundImage: "https://picsum.photos/seed/donpepe-bg/1200/600",
       color: { primary: "#D32F2F", secondary: "#212121" },// rojo + gris oscuro
-      puntosDeVenta: "Sucursal Centro, Sucursal Palermo"
+      pos: "Sucursal Centro, Sucursal Palermo"
     },
     {
       userId: 1,
@@ -18,7 +18,7 @@ const seedMenus = async () => {
       logo: "https://picsum.photos/seed/laplaza-logo/256/256",
       backgroundImage: "https://picsum.photos/seed/laplaza-bg/1200/600",
       color: { primary: "#6A4E23", secondary: "#2B2B2B" }, // marrón café + gris oscuro
-      puntosDeVenta: "Sucursal Centro, Sucursal Palermo soho"
+      pos: "Sucursal Centro, Sucursal Palermo soho"
     }
   ]);
 };

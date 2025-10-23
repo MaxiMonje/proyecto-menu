@@ -12,7 +12,7 @@ export const createMenuSchema = z.object({
         primary: hex,
         secondary: hex,
         }).optional(),
-    puntosDeVenta: z.string().max(255).optional(),
+    pos: z.string().max(255).optional(),
 }),
 });
 export const updateMenuSchema = z.object({
@@ -25,7 +25,7 @@ export const updateMenuSchema = z.object({
         primary: hex,
         secondary: hex,
         }).optional(),
-    puntosDeVenta: z.string().max(255).optional(),    
+    pos: z.string().max(255).optional(),    
 }),
 params: z.object({ id: z.string().regex(/^\d+$/) }),
 });
