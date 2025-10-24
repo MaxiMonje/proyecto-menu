@@ -23,5 +23,4 @@ export const updateMenuSchema = z.object({
         secondary: hex,
         }).optional(),
     pos: z.string().max(255).optional(),    
-params: z.object({ id: z.string().regex(/^\d+$/) }),
 });
