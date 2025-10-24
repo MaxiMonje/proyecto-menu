@@ -6,7 +6,6 @@ export interface MenuColorDto {
 
 
 export interface CreateMenuDto { 
-    userId: number; 
     title: string;
     logo?: string;
     backgroundImage?: string;

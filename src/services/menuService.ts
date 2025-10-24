@@ -8,64 +8,82 @@ import { Category } from "../models/Category";
 import { Item } from "../models/Item";
 import ItemImage from "../models/ItemImage";
 
+/**
+ * Obtener todos los menús activos de un tenant (por userId)
+ */
+export const getAllMenus = async (userId: number) => {
+  return Menu.findAll({
+    where: { active: true, userId },
+    order: [["id", "ASC"]],
+  });
+};
 
-export const getAllMenus = async () => MenuM.findAll({ where: { active: true }, order: [["id", "ASC"]] });
-
+/**
+ * Obtener un menú simple (sin relaciones)
+ */
 export const jgetMenuById = async (id: number) => {
-    const menu = await MenuM.findOne({ where: { id, active: true } });
-    if (!menu) throw new ApiError("Menu not found", 404);
-return menu;
+  const menu = await MenuM.findOne({ where: { id, active: true } });
+  if (!menu) throw new ApiError("Menu not found", 404);
+  return menu;
 };
 
-export const createMenu = async (data: CreateMenuDto) => MenuM.create(data as MenuCreationAttributes);
-
-export const updateMenu = async (id: number, data: UpdateMenuDto) => {
-    const menu = await getMenuById(id);
-    await menu.update(data);
-return menu;
+/**
+ * Crear un menú dentro del tenant actual (userId)
+ */
+export const createMenu = async (userId: number, data: CreateMenuDto) => {
+  return MenuM.create({ ...(data as MenuCreationAttributes), userId });
 };
 
-export const deleteMenu = async (id: number) => {
-    const menu = await getMenuById(id);
-    await menu.update({ active: false });
+/**
+ * Actualizar un menú existente (scope por tenant)
+ */
+export const updateMenu = async (userId: number, id: number, data: UpdateMenuDto) => {
+  const menu = await getMenuById(userId, id);
+  await menu.update(data);
+  return menu;
 };
 
+/**
+ * Baja lógica de un menú (scope por tenant)
+ */
+export const deleteMenu = async (userId: number, id: number) => {
+  const menu = await getMenuById(userId, id);
+  await menu.update({ active: false });
+};
 
-export const getMenuById = async (id: number, t?: Transaction) => {
+/**
+ * Obtener un menú con toda su jerarquía (categorías, ítems e imágenes)
+ */
+export const getMenuById = async (userId: number, id: number, t?: Transaction) => {
   const menu = await Menu.findOne({
-    where: { id },
+    where: { id, userId },
     include: [
       {
         model: Category,
         as: "categories",
-        required: false,               // trae el menú aunque no tenga categorías
-        separate: false,
-        // Si usás flags de visibilidad, podés filtrar:
-        // where: { active: true },
+        required: false,
         include: [
           {
             model: Item,
             as: "items",
-            required: false,           // trae la categoría aunque no tenga items
-            // where: { active: true }, // si usás active en items
+            required: false,
             include: [
               {
                 model: ItemImage,
                 as: "images",
-                required: false,       // items sin imágenes también aparecen
-                // where: { active: true }, // si mantenés este flag
-                separate: true,        // ordena por tabla hija sin inflar el JOIN
+                required: false,
+                separate: true,
                 order: [["sortOrder", "ASC"], ["id", "ASC"]],
               },
             ],
-            order: [["id", "ASC"]],    // o [["sortOrder", "ASC"]], si tenés esa columna en items
+            order: [["id", "ASC"]],
           },
         ],
-        order: [["id", "ASC"]],        // o [["sortOrder", "ASC"]] si tu Category tiene sort
+        order: [["id", "ASC"]],
       },
     ],
     transaction: t,
-    order: [[{ model: Category, as: "categories" }, "id", "ASC"]], // orden de categorías a nivel raíz
+    order: [[{ model: Category, as: "categories" }, "id", "ASC"]],
   });
 
   if (!menu) throw new ApiError("Menu not found", 404);

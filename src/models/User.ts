@@ -13,6 +13,7 @@ export interface UserAttributes {
   active: boolean;
   passwordHash: string;
   password?: string; // virtual: viene en requests/seeders, no se persiste
+  subdomain: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -35,6 +36,7 @@ export class User
   public active!: boolean;
   public passwordHash!: string;
   public password?: string;
+  public subdomain!: string;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -85,6 +87,8 @@ User.init(
 
     // Hash persistido (NOT NULL)
     passwordHash: { type: DataTypes.STRING(255), allowNull: false },
+
+    subdomain: { type: DataTypes.STRING, allowNull: false, unique: true},
   },
   {
     sequelize,

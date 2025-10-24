@@ -12,6 +12,7 @@ const seedUser = async () => {
         roleId: 1,
         active: true,
         password: "AnaClave1", // 9 chars
+        subdomain: "amax",
       },
       {
         name: "Bruno",
@@ -21,6 +22,7 @@ const seedUser = async () => {
         roleId: 2,
         active: true,
         password: "Bruno1234", // 9 chars
+        subdomain: "amaxito",
       },
       {
         name: "Carla",
@@ -30,6 +32,7 @@ const seedUser = async () => {
         roleId: 3,
         active: true,
         password: "Carla2024", // 9 chars
+        subdomain: "amaxlote",
       },
       {
         name: "Diego",
@@ -39,6 +42,7 @@ const seedUser = async () => {
         roleId: 3,
         active: true,
         password: "Diego0008", // 9 chars
+        subdomain: "amaxlequeano",
       },
       {
         name: "Elena",
@@ -47,7 +51,8 @@ const seedUser = async () => {
         cel: "1123456784",
         roleId: 2,
         active: true,
-        password: "Elena8899", // 9 chars
+        password: "Elena8899", // 9 chars}
+        subdomain: "amaxpito",
       },
     ],
     { individualHooks: true }

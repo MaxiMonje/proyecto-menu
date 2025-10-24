@@ -4,7 +4,7 @@ import { CreateUserDto, UpdateUserDto } from "../dtos/user.dto";
 import { ApiError } from "../utils/ApiError";
 import { Op, UniqueConstraintError, ValidationError } from "sequelize";
 import argon2 from "argon2";
-import crypto from "crypto"; 
+import crypto from "crypto";
 import {
   PaginationParams,
   PaginatedResult,
@@ -14,6 +14,35 @@ import { sendMail } from "../utils/mailerClient";
 import sequelize from "../utils/databaseService";
 
 const RESET_TTL_MIN = parseInt(process.env.PASSWORD_RESET_TTL_MINUTES ?? "10", 10);
+
+/* ===================== Helpers de subdomain ===================== */
+
+const normalizeSlug = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // quita acentos
+    .replace(/[^a-z0-9-]+/g, "-")    // solo letras/números/guiones
+    .replace(/--+/g, "-")            // colapsa guiones
+    .replace(/^-+|-+$/g, "");        // sin guiones extremos
+
+const makeBaseSubdomain = (name: string, lastName: string) =>
+  normalizeSlug(`${name}-${lastName}`);
+
+const ensureUniqueSubdomain = async (base: string): Promise<string> => {
+  let candidate = base || "tenant";
+  let n = 1;
+  // si existe, probamos con -2, -3, ...
+  while (true) {
+    const exists = await User.findOne({ where: { subdomain: candidate } });
+    if (!exists) return candidate;
+    n += 1;
+    candidate = `${base}-${n}`;
+    if (n > 9999) throw new ApiError("Unable to allocate unique subdomain", 500);
+  }
+};
+
+/* ========================= Users ========================= */
 
 export const getAllUsers = async (
   pg: PaginationParams
@@ -45,54 +74,79 @@ export const createGoogleUser = async (userData: {
   roleId: number;
 }) => {
   try {
-    const tempPassword = 'google' + Math.random().toString(36).substring(2, 8);
-    
-    // Generar el hash manualmente (igual que haría el hook)
+    const tempPassword = "google" + Math.random().toString(36).substring(2, 8);
+
+    // Hash manual (coherente con tu modelo)
     const passwordHash = await argon2.hash(tempPassword);
-    
-    console.log('Intentando crear usuario con datos:', {
-      ...userData,
-      password: tempPassword,
-      passwordHash: '[HASH_GENERADO]',
-      passwordLength: tempPassword.length
-    });
-    
-    // Enviar tanto password como passwordHash, igual que en Postman
+
+    // Generar subdomain automático y único
+    const base = makeBaseSubdomain(userData.name, userData.lastName);
+    const subdomain = await ensureUniqueSubdomain(base);
+
     const user = await User.create({
       name: userData.name,
       lastName: userData.lastName,
       email: userData.email,
       cel: userData.cel,
       roleId: userData.roleId,
-      password: tempPassword,
-      passwordHash: passwordHash, // Agregar el hash explícitamente
+      password: tempPassword, // por si tu modelo tiene setter
+      passwordHash,           // cumplir allowNull: false
       active: true,
-    });
-    
-    console.log('Usuario creado exitosamente:', user.email);
+      subdomain,              // 👈 generado automáticamente
+    } as UserCreationAttributes);
+
     return user;
-  } catch (error) {
-    console.error('Error detallado en createGoogleUser:', error);
+  } catch (error: any) {
+    if (error instanceof UniqueConstraintError || error?.name === "SequelizeUniqueConstraintError") {
+      throw new ApiError("Email or subdomain already in use", 409);
+    }
+    if (error instanceof ValidationError) {
+      throw new ApiError(error.errors.map((e) => e.message).join(", "), 400);
+    }
+    console.error("Error detallado en createGoogleUser:", error);
     throw error;
   }
 };
 
 export const createUser = async (data: CreateUserDto) => {
   try {
-    // Pre-chequeo para dar un 409 limpio
+    // 1) Email único (409 limpio)
     const exists = await User.findOne({ where: { email: data.email } });
     if (exists) throw new ApiError("Email already in use", 409);
 
-    const userData: UserCreationAttributes = { ...data, active: true } as UserCreationAttributes;
-    const created = await User.create(userData); // hooks -> hashea y setea passwordHash
+    // 2) Password válida
+    const pwd = (data.password ?? "").trim();
+    if (pwd.length < 8 || pwd.length > 16) {
+      throw new ApiError("Password must be between 8 and 16 characters.", 400);
+    }
+
+    // 3) Subdomain automático y único a partir de name-lastName
+    const base = makeBaseSubdomain(data.name, data.lastName);
+    const subdomain = await ensureUniqueSubdomain(base);
+
+    // 4) Hash explícito para cumplir allowNull:false en passwordHash
+    const passwordHash = await argon2.hash(pwd);
+
+    // 5) Crear user
+    const created = await User.create({
+      name: data.name,
+      lastName: data.lastName,
+      email: data.email,
+      cel: data.cel,
+      roleId: data.roleId,
+      password: pwd,      // si hay setter, se dispara
+      passwordHash,       // explícito para evitar null
+      active: true,
+      subdomain,          // 👈 generado automático
+    } as UserCreationAttributes);
+
     return created;
   } catch (err: any) {
     if (err instanceof UniqueConstraintError || err?.name === "SequelizeUniqueConstraintError") {
-      // Respaldo por constraint único en DB
-      throw new ApiError("Email already in use", 409);
+      throw new ApiError("Email or subdomain already in use", 409);
     }
     if (err instanceof ValidationError) {
-      throw new ApiError(err.errors.map(e => e.message).join(", "), 400);
+      throw new ApiError(err.errors.map((e) => e.message).join(", "), 400);
     }
     throw err;
   }
@@ -106,6 +160,9 @@ export const updateUser = async (id: number, data: UpdateUserDto) => {
     const taken = await User.findOne({ where: { email: data.email, id: { [Op.ne]: id } } });
     if (taken) throw new ApiError("Email already in use", 409);
   }
+
+  // ⚠️ Por estabilidad del tenant NO regeneramos subdomain automáticamente
+  // si cambian name/lastName. Si querés permitirlo, lo hacemos con endpoint aparte.
 
   if ("password" in data) {
     if (typeof data.password !== "string") {
@@ -130,22 +187,21 @@ export const updateUser = async (id: number, data: UpdateUserDto) => {
     await user.save();
   } catch (err: any) {
     if (err instanceof UniqueConstraintError || err?.name === "SequelizeUniqueConstraintError") {
-      throw new ApiError("Email already in use", 409);
+      throw new ApiError("Email or subdomain already in use", 409);
     }
     if (err instanceof ValidationError) {
-      throw new ApiError(err.errors.map(e => e.message).join(", "), 400);
+      throw new ApiError(err.errors.map((e) => e.message).join(", "), 400);
     }
     throw err;
   }
 
-  // 🔐 Si se cambió la password, verifico y luego INVALIDO tokens pendientes
+  // Si se cambió la password, verifico e invalido tokens pendientes
   if ("password" in data && typeof data.password === "string" && data.password.trim().length >= 8) {
     const fresh = await User.scope("withHash").findByPk(user.id);
     if (!fresh) throw new ApiError("User not found after update", 500);
     const ok = await fresh.validatePassword(data.password.trim());
     if (!ok) throw new ApiError("Password update failed", 500);
 
-    // ⛔️ Invalida TODOS los tokens no usados de este usuario
     await PasswordResetToken.update(
       { is_used: true },
       { where: { user_id: user.id, is_used: false } }
@@ -167,14 +223,14 @@ export const getUserByEmailForAuth = async (email: string) => {
   return await User.unscoped().findOne({ where: { email: normalized } }); // 👈 sin filtrar active
 };
 
-// ===== FUNCIONES MODIFICADAS PARA TOKENS DE RESET =====
+/* ================= Tokens de reset ================= */
 
 export const requestPasswordReset = async (email: string, resetUrl?: string) => {
   const user = await User.findOne({ where: { email, active: true } });
   if (!user) throw new ApiError("No se encontró una cuenta con este email.", 404);
 
   // token crudo (para el link) + hash (para DB)
-  const rawToken  = crypto.randomBytes(32).toString("hex");
+  const rawToken = crypto.randomBytes(32).toString("hex");
   const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
   const expiresAt = new Date(Date.now() + RESET_TTL_MIN * 60 * 1000); // ⏳ 10 min
 
@@ -270,4 +326,3 @@ export const resetPasswordWithToken = async (token: string, newPassword: string)
     return { message: "Contraseña cambiada exitosamente" };
   });
 };
-
