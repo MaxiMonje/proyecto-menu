@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+const subdomain = z
+  .string()
+  .min(3, "El subdominio debe tener al menos 3 caracteres")
+  .max(63, "El subdominio no puede superar 63 caracteres")
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Usá minúsculas, números y guiones (sin espacios)");
+  
 export const createUserSchema = z.object({
   name: z.string().min(1),
   lastName: z.string().min(1),
@@ -7,6 +13,7 @@ export const createUserSchema = z.object({
   cel: z.string().min(1),
   roleId: z.number(),
   password: z.string().trim().min(8).max(16),           // 👈 TRIM
+  subdomain,
 });
 
 export const updateUserSchema = z

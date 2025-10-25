@@ -5,6 +5,7 @@ export interface CreateUserDto {
   cel: string;
   roleId: number;
   password: string;        // <- requerido
+  subdomain: string;
 }
 
 export interface UpdateUserDto {

@@ -8,7 +8,7 @@ import { getAllMenus, getMenuById, createMenu, updateMenu, deleteMenu } from "..
 const menuRouter = Router();
 
 
-menuRouter.use(tenantMiddleware);
+//menuRouter.use(tenantMiddleware);
 
 menuRouter.get("/", getAllMenus);
 menuRouter.get("/:id", getMenuById);

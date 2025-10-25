@@ -11,12 +11,13 @@ type AuthTokenPayload = {
   roleId: number;
   name: string;
   lastName: string;
+  subdomain: string;
 };
 
 
 export const googleSync = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { firebaseUid, name, lastName, email, cel } = req.body;
+    const { firebaseUid, name, lastName, email, cel, subdomain} = req.body;
     
     if (!email || !name || !lastName) {
       return res.status(400).json({ message: "Email, name and lastName are required" });
@@ -41,6 +42,7 @@ export const googleSync = async (req: Request, res: Response, next: NextFunction
           email,
           cel: cel || '',
           roleId: 2, // rol por defecto - ajustar según tu lógica
+          subdomain, 
         });
       } catch (createError) {
         console.error('Error creando usuario de Google:', createError);
@@ -55,6 +57,7 @@ export const googleSync = async (req: Request, res: Response, next: NextFunction
       roleId: user.roleId,
       name: user.name,
       lastName: user.lastName,
+      subdomain: user.subdomain,
     };
     
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: EXPIRES_IN });
@@ -107,6 +110,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       roleId: user.roleId,
       name: user.name,
       lastName: user.lastName,
+      subdomain: user.subdomain,
     };
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: EXPIRES_IN });
 
@@ -121,6 +125,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         cel: user.cel,
         roleId: user.roleId,
         active: user.active,
+        subdomain: user.subdomain,
       },
     });
   } catch (err) {

@@ -15,6 +15,7 @@ import menuRouter from "./routes/menuRouter";
 import imageRouter from "./routes/imageRouter";
 import categoryRouter from "./routes/categoryRouter";
 import itemRouter from "./routes/itemRouter";
+import { tenantMiddleware } from './middlewares/tenant';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -22,12 +23,15 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(errorHandler);
+
 
 app.use("/api/users", userRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/roles", roleRouter);
 app.use("/api/payments", paymentRouter);
+
+app.use(tenantMiddleware);
+
 app.use("/api/menus", menuRouter);
 app.use("/api/images", imageRouter);
 app.use("/api/categories", categoryRouter);
