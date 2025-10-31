@@ -5,6 +5,7 @@ import { Menu } from "../models/Menu";
 import { Item } from "../models/Item";
 import ItemImage from "../models/ItemImage";
 import sequelize from "../utils/databaseService";
+import { toS3UrlFromExternal } from "../utils/s3urlUtils";
 import { Op, Transaction } from "sequelize";
 
 type NewImage = { url: string; alt?: string | null; sortOrder?: number; };
@@ -68,16 +69,20 @@ export const createCategoryDeep = async (userId: number, body: NewCategoryPayloa
           { transaction: t }
         );
         if (it.images?.length) {
-          await ItemImage.bulkCreate(
-            it.images.map(img => ({
-              itemId: item.id,
-              url: img.url,
-              alt: img.alt ?? null,
-              sortOrder: img.sortOrder ?? 0,
-              active: true,
-            })),
-            { transaction: t }
+          const rows = await Promise.all(
+           it.images.map(async (img) => {
+              // Subimos la URL externa a S3 y guardamos la URL S3/CDN en el mismo campo `url`
+              const finalUrl = await toS3UrlFromExternal(img.url, `items/${item.id}`);
+              return {
+                itemId: item.id,
+                url: finalUrl,
+                alt: img.alt ?? null,
+                sortOrder: img.sortOrder ?? 0,
+                active: true,
+             };
+            })
           );
+          await ItemImage.bulkCreate(rows, { transaction: t });
         }
       }
     }
@@ -181,7 +186,14 @@ export const updateCategoryDeep = async (userId: number, categoryId: number, bod
               const found = existingImgById.get(im.id);
               if (!found) throw new ApiError(`Image ${im.id} not found in item ${item.id}`, 404);
 
-              const imgPatch: any = {};
+                const imgPatch: any = {};
+                if (typeof im.url === "string") {
+                  // Si la request trae una URL nueva, la subimos a S3 y guardamos la S3/CDN
+                  const finalUrl = await toS3UrlFromExternal(im.url, `items/${item.id}`);
+                  imgPatch.url = finalUrl;
+                }
+
+             
               if (typeof im.url === "string") imgPatch.url = im.url;
               if (typeof im.alt !== "undefined") imgPatch.alt = im.alt;
               if (typeof im.sortOrder === "number") imgPatch.sortOrder = im.sortOrder;
@@ -192,14 +204,15 @@ export const updateCategoryDeep = async (userId: number, categoryId: number, bod
               }
               seenImageIds.add(found.id);
             } else {
-              // create image
-              await ItemImage.create({
-                itemId: item.id,
-                url: im.url!,
-                alt: typeof im.alt === "undefined" ? null : im.alt,
-                sortOrder: im.sortOrder ?? 0,
-                active: typeof im.active === "boolean" ? im.active : true,
-              }, { transaction: t });
+                // create image (subiendo primero a S3)
+                const finalUrl = await toS3UrlFromExternal(im.url!, `items/${item.id}`);
+                await ItemImage.create({
+                  itemId: item.id,
+                  url: finalUrl,
+                  alt: typeof im.alt === "undefined" ? null : im.alt,
+                  sortOrder: im.sortOrder ?? 0,
+                  active: typeof im.active === "boolean" ? im.active : true,
+                }, { transaction: t });
             }
           }
 
@@ -222,18 +235,21 @@ export const updateCategoryDeep = async (userId: number, categoryId: number, bod
           // description: it.description ?? null,   // si tu modelo NO tiene, comentá esto
         }, { transaction: t });
 
-        if (it.images?.length) {
-          await ItemImage.bulkCreate(
-            it.images.map(im => ({
-              itemId: newItem.id,
-              url: im.url!,
-              alt: typeof im.alt === "undefined" ? null : im.alt,
-              sortOrder: im.sortOrder ?? 0,
-              active: typeof im.active === "boolean" ? im.active : true,
-            })),
-            { transaction: t }
+       if (it.images?.length) {
+          const rows = await Promise.all(
+            it.images.map(async (im) => {
+              const finalUrl = await toS3UrlFromExternal(im.url!, `items/${newItem.id}`);
+              return {
+                itemId: newItem.id,
+                url: finalUrl,
+                alt: typeof im.alt === "undefined" ? null : im.alt,
+                sortOrder: im.sortOrder ?? 0,
+                active: typeof im.active === "boolean" ? im.active : true,
+              };
+            })
           );
-        }
+          await ItemImage.bulkCreate(rows, { transaction: t });
+      }
         seenItemIds.add(newItem.id);
       }
     }

@@ -5,6 +5,9 @@ import { CreateItemDto, UpdateItemDto } from "../dtos/item.dto";
 import { ApiError as Err3 } from "../utils/ApiError";
 import sequelize from "../utils/databaseService";
 
+/** ⬇️ NUEVO: helper mínimo para convertir URL externa → URL S3/CDN */
+import { toS3UrlFromExternal } from "../utils/s3urlUtils";
+
 /* ===========================
  * Helpers genéricos
  * =========================== */
@@ -17,12 +20,11 @@ function has<K extends string>(obj: any, key: K): obj is Record<K, unknown> {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function imageUpdateData(img: any) {
+function imageBasePatch(img: any) {
   const patch: any = {};
-  if (has(img, "url"))       patch.url = img.url;        // solo si vino
-  if (has(img, "alt"))       patch.alt = img.alt;        // solo si vino (puede ser null a propósito)
+  if (has(img, "alt"))       patch.alt = img.alt;        // puede ser null a propósito
   if (has(img, "sortOrder")) patch.sortOrder = img.sortOrder;
-  if (has(img, "active"))    patch.active = img.active;  // opcional, no se usa para borrar
+  if (has(img, "active"))    patch.active = img.active;  // opcional
   return patch;
 }
 
@@ -67,17 +69,21 @@ export const createItem = async (data: CreateItemDto) =>
     const { images = [], ...rest } = data;
     const it = await ItemM.create(rest as ItemCreationAttributes, { transaction: t });
 
+    // ⬇️ Cambio mínimo: subimos cada URL a S3 y guardamos la URL final en el mismo campo `url`
     if (images.length) {
-      await ItemImage.bulkCreate(
-        images.map((img, idx) => ({
-          itemId: it.id,
-          url: img.url,
-          alt: img.alt ?? null,
-          sortOrder: img.sortOrder ?? idx,
-          active: img.active ?? true, // puede quedar, no afecta el hard delete
-        })),
-        { transaction: t }
+      const rows = await Promise.all(
+        images.map(async (img, idx) => {
+          const finalUrl = await toS3UrlFromExternal(img.url, `items/${it.id}`);
+          return {
+            itemId: it.id,
+            url: finalUrl,                    // antes: img.url
+            alt: img.alt ?? null,
+            sortOrder: img.sortOrder ?? idx,
+            active: img.active ?? true,
+          };
+        })
       );
+      await ItemImage.bulkCreate(rows, { transaction: t });
     }
 
     await it.reload({
@@ -148,7 +154,12 @@ async function hardDeleteImage(itemId: number, img: any, t: Transaction) {
 }
 
 async function updateImagePartial(itemId: number, img: any, t: Transaction) {
-  const patch = imageUpdateData(img);
+  // ⬇️ Si viene una URL nueva, la convertimos a S3 antes de actualizar
+  const patch: any = imageBasePatch(img);
+  if (has(img, "url") && typeof img.url === "string") {
+    const finalUrl = await toS3UrlFromExternal(img.url, `items/${itemId}`);
+    patch.url = finalUrl;
+  }
   if (Object.keys(patch).length === 0) return; // nada que actualizar
   await ItemImage.update(patch, {
     where: { id: img.id, itemId },
@@ -157,10 +168,12 @@ async function updateImagePartial(itemId: number, img: any, t: Transaction) {
 }
 
 async function createImage(itemId: number, img: any, t: Transaction) {
+  // ⬇️ En creación también subimos la URL externa a S3 y guardamos la final
+  const finalUrl = await toS3UrlFromExternal(img.url, `items/${itemId}`);
   await ItemImage.create(
     {
       itemId,
-      url: img.url,                       // Zod exige url en creación
+      url: finalUrl,                    // antes: img.url
       alt: img.alt ?? null,
       sortOrder: img.sortOrder ?? 0,
       active: img.active ?? true,
