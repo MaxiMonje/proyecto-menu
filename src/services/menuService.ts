@@ -1,61 +1,53 @@
+import { Transaction } from "sequelize";
 import { Menu as MenuM, MenuCreationAttributes } from "../models/Menu";
 import { CreateMenuDto, UpdateMenuDto } from "../dtos/menu.dto";
 import { ApiError } from "../utils/ApiError";
+import sequelize from "../utils/databaseService";
+import { ImageS3Service } from "../s3-image-module";
 
-import { Transaction } from "sequelize";
-import { Menu } from "../models/Menu";
 import { Category } from "../models/Category";
 import { Item } from "../models/Item";
 import ItemImage from "../models/ItemImage";
 
-/**
- * Obtener todos los menús activos de un tenant (por userId)
- */
+/* ===========================
+ * Helpers comunes
+ * =========================== */
+
+function pickFile(files: Express.Multer.File[] | undefined, field?: string) {
+  if (!files || !field) return null;
+  return files.find(f => f.fieldname === field) ?? null;
+}
+
+async function resolveMenuImage(
+  files: Express.Multer.File[] | undefined,
+  fieldName: string,
+  folder: string
+): Promise<string | null> {
+  const file = pickFile(files, fieldName);
+  if (!file) return null;
+
+  const up = await ImageS3Service.uploadImage(file as any, folder, {
+    maxWidth: 1600,
+    maxHeight: 1600,
+  });
+  return up.url;
+}
+
+/* ===========================
+ * CRUD con subida a S3
+ * =========================== */
+
+/** Obtener todos los menús activos del tenant */
 export const getAllMenus = async (userId: number) => {
-  return Menu.findAll({
+  return MenuM.findAll({
     where: { active: true, userId },
     order: [["id", "ASC"]],
   });
 };
 
-/**
- * Obtener un menú simple (sin relaciones)
- */
-export const jgetMenuById = async (id: number) => {
-  const menu = await MenuM.findOne({ where: { id, active: true } });
-  if (!menu) throw new ApiError("Menu not found", 404);
-  return menu;
-};
-
-/**
- * Crear un menú dentro del tenant actual (userId)
- */
-export const createMenu = async (userId: number, data: CreateMenuDto) => {
-  return MenuM.create({ ...(data as MenuCreationAttributes), userId });
-};
-
-/**
- * Actualizar un menú existente (scope por tenant)
- */
-export const updateMenu = async (userId: number, id: number, data: UpdateMenuDto) => {
-  const menu = await getMenuById(userId, id);
-  await menu.update(data);
-  return menu;
-};
-
-/**
- * Baja lógica de un menú (scope por tenant)
- */
-export const deleteMenu = async (userId: number, id: number) => {
-  const menu = await getMenuById(userId, id);
-  await menu.update({ active: false });
-};
-
-/**
- * Obtener un menú con toda su jerarquía (categorías, ítems e imágenes)
- */
+/** Obtener un menú con toda su jerarquía */
 export const getMenuById = async (userId: number, id: number, t?: Transaction) => {
-  const menu = await Menu.findOne({
+  const menu = await MenuM.findOne({
     where: { id, userId },
     include: [
       {
@@ -88,4 +80,77 @@ export const getMenuById = async (userId: number, id: number, t?: Transaction) =
 
   if (!menu) throw new ApiError("Menu not found", 404);
   return menu;
+};
+
+/** Crear menú (con logo y background opcionales) */
+export const createMenu = async (
+  userId: number,
+  data: CreateMenuDto,
+  files?: Express.Multer.File[]
+) => {
+  return await sequelize.transaction(async (t: Transaction) => {
+    const menu = await MenuM.create(
+      {
+        ...(data as MenuCreationAttributes),
+        userId,
+        active: data.active ?? true,
+      },
+      { transaction: t }
+    );
+
+    // Subir archivos si vinieron
+    const logoUrl = await resolveMenuImage(files, "logo", `menus/${menu.id}`);
+    const bgUrl = await resolveMenuImage(files, "backgroundImage", `menus/${menu.id}`);
+
+    if (logoUrl || bgUrl) {
+      await menu.update(
+        {
+          ...(logoUrl ? { logo: logoUrl } : {}),
+          ...(bgUrl ? { backgroundImage: bgUrl } : {}),
+        },
+        { transaction: t }
+      );
+    }
+
+    return menu;
+  });
+};
+
+/** Actualizar menú existente */
+export const updateMenu = async (
+  userId: number,
+  id: number,
+  data: UpdateMenuDto,
+  files?: Express.Multer.File[]
+) => {
+  return await sequelize.transaction(async (t: Transaction) => {
+    const menu = await MenuM.findOne({ where: { id, userId }, transaction: t });
+    if (!menu) throw new ApiError("Menu not found", 404);
+
+    const patch: any = {};
+    if (typeof data.title === "string") patch.title = data.title;
+    if (typeof data.active === "boolean") patch.active = data.active;
+    if (typeof data.pos === "string") patch.pos = data.pos;
+    if (data.color) patch.color = data.color;
+
+    // Subir imágenes nuevas
+    const logoUrl = await resolveMenuImage(files, "logo", `menus/${menu.id}`);
+    const bgUrl = await resolveMenuImage(files, "backgroundImage", `menus/${menu.id}`);
+
+    if (logoUrl) patch.logo = logoUrl;
+    if (bgUrl) patch.backgroundImage = bgUrl;
+
+    if (Object.keys(patch).length > 0) {
+      await menu.update(patch, { transaction: t });
+    }
+
+    return menu;
+  });
+};
+
+/** Baja lógica */
+export const deleteMenu = async (userId: number, id: number) => {
+  const menu = await MenuM.findOne({ where: { id, userId } });
+  if (!menu) throw new ApiError("Menu not found", 404);
+  await menu.update({ active: false });
 };

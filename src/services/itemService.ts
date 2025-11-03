@@ -5,8 +5,9 @@ import { CreateItemDto, UpdateItemDto } from "../dtos/item.dto";
 import { ApiError as Err3 } from "../utils/ApiError";
 import sequelize from "../utils/databaseService";
 
-/** ⬇️ NUEVO: helper mínimo para convertir URL externa → URL S3/CDN */
-import { toS3UrlFromExternal } from "../utils/s3urlUtils";
+// ⚠️ Ya no dependemos solo de toS3UrlFromExternal; si viene archivo, subimos con ImageS3Service
+// import { toS3UrlFromExternal } from "../utils/s3urlUtils";
+import { ImageS3Service } from "../s3-image-module";
 
 /* ===========================
  * Helpers genéricos
@@ -24,8 +25,41 @@ function imageBasePatch(img: any) {
   const patch: any = {};
   if (has(img, "alt"))       patch.alt = img.alt;        // puede ser null a propósito
   if (has(img, "sortOrder")) patch.sortOrder = img.sortOrder;
-  if (has(img, "active"))    patch.active = img.active;  // opcional
+  if (has(img, "active"))    patch.active = img.active;
   return patch;
+}
+
+/* ===========================
+ * Helpers archivos / URL
+ * =========================== */
+
+function pickFile(files: Express.Multer.File[] | undefined, field?: string) {
+  if (!files || !field) return null;
+  return files.find(f => f.fieldname === field) ?? null;
+}
+
+/**
+ * Resuelve la URL final:
+ * - Si llega `fileField` y existe ese archivo en `files`, sube a S3 y devuelve la URL S3/CDN.
+ * - Si llega `url`, devuelve esa URL (compatibilidad).
+ * - Si no llega ninguno, error.
+ */
+async function resolveImageUrl(
+  img: { url?: string; fileField?: string },
+  folder: string,
+  files?: Express.Multer.File[]
+): Promise<string> {
+  const file = pickFile(files, img.fileField);
+  if (file) {
+    const up = await ImageS3Service.uploadImage(file as any, folder, { maxWidth: 1600, maxHeight: 1600 });
+    return up.url;
+  }
+  if (img.url) {
+    return img.url; // si querés forzar que todo sea archivo, tirá error acá
+    // // Ejemplo (opcional):
+    // throw new Err3("Solo se aceptan archivos (fileField), no URL directa", 400);
+  }
+  throw new Err3("Debe venir url o fileField", 400);
 }
 
 /* ===========================
@@ -61,22 +95,21 @@ export const getItemById = async (id: number, t?: Transaction) => {
 };
 
 /* ===========================
- * Creación
+ * Creación (ahora con archivos)
  * =========================== */
 
-export const createItem = async (data: CreateItemDto) =>
+export const createItem = async (data: CreateItemDto, files?: Express.Multer.File[]) =>
   withTx(async (t) => {
-    const { images = [], ...rest } = data;
+    const { images = [], ...rest } = data as any;
     const it = await ItemM.create(rest as ItemCreationAttributes, { transaction: t });
 
-    // ⬇️ Cambio mínimo: subimos cada URL a S3 y guardamos la URL final en el mismo campo `url`
     if (images.length) {
       const rows = await Promise.all(
-        images.map(async (img, idx) => {
-          const finalUrl = await toS3UrlFromExternal(img.url, `items/${it.id}`);
+        images.map(async (img: any, idx: number) => {
+          const finalUrl = await resolveImageUrl(img, `items/${it.id}`, files);
           return {
             itemId: it.id,
-            url: finalUrl,                    // antes: img.url
+            url: finalUrl,
             alt: img.alt ?? null,
             sortOrder: img.sortOrder ?? idx,
             active: img.active ?? true,
@@ -100,21 +133,21 @@ export const createItem = async (data: CreateItemDto) =>
   });
 
 /* ===========================
- * Update — versión modular (con HARD delete de imágenes)
+ * Update — modular (HARD delete de imágenes nuevas con _delete)
  * =========================== */
 
-export const updateItem = async (id: number, data: UpdateItemDto) =>
+export const updateItem = async (id: number, data: UpdateItemDto, files?: Express.Multer.File[]) =>
   withTx(async (t) => {
     const it = await ItemM.findByPk(id, { transaction: t });
     if (!it) throw new Err3("Item not found", 404);
 
-    const { images, ...rest } = data;
+    const { images, ...rest } = data as any;
     if (rest && Object.keys(rest).length) {
       await it.update(rest, { transaction: t });
     }
 
     if (Array.isArray(images)) {
-      await upsertItemImages(id, images, t);
+      await upsertItemImages(id, images, files, t);
     }
 
     await it.reload({
@@ -134,16 +167,21 @@ export const updateItem = async (id: number, data: UpdateItemDto) =>
  * Helpers específicos de imágenes
  * =========================== */
 
-async function upsertItemImages(itemId: number, images: any[], t: Transaction) {
+async function upsertItemImages(
+  itemId: number,
+  images: any[],
+  files: Express.Multer.File[] | undefined,
+  t: Transaction
+) {
   for (const img of images) {
     if (img._delete) {
       await hardDeleteImage(itemId, img, t);
       continue;
     }
     if (img.id) {
-      await updateImagePartial(itemId, img, t);
+      await updateImagePartial(itemId, img, files, t);
     } else {
-      await createImage(itemId, img, t);
+      await createImage(itemId, img, files, t);
     }
   }
 }
@@ -153,27 +191,40 @@ async function hardDeleteImage(itemId: number, img: any, t: Transaction) {
   await ItemImage.destroy({ where: { id: img.id, itemId }, transaction: t });
 }
 
-async function updateImagePartial(itemId: number, img: any, t: Transaction) {
-  // ⬇️ Si viene una URL nueva, la convertimos a S3 antes de actualizar
+type ImgInput = { url?: string; fileField?: string };
+
+async function updateImagePartial(
+  itemId: number,
+  img: ImgInput & Record<string, any>,
+  files: Express.Multer.File[] | undefined,
+  t: Transaction
+) {
   const patch: any = imageBasePatch(img);
-  if (has(img, "url") && typeof img.url === "string") {
-    const finalUrl = await toS3UrlFromExternal(img.url, `items/${itemId}`);
+
+  // 🧩 Subimos nueva imagen si vino `fileField` o nueva `url`
+  if (img.url || img.fileField) {
+    const finalUrl = await resolveImageUrl(img, `items/${itemId}`, files);
     patch.url = finalUrl;
   }
+
   if (Object.keys(patch).length === 0) return; // nada que actualizar
+
   await ItemImage.update(patch, {
     where: { id: img.id, itemId },
     transaction: t,
   });
 }
-
-async function createImage(itemId: number, img: any, t: Transaction) {
-  // ⬇️ En creación también subimos la URL externa a S3 y guardamos la final
-  const finalUrl = await toS3UrlFromExternal(img.url, `items/${itemId}`);
+async function createImage(
+  itemId: number,
+  img: any,
+  files: Express.Multer.File[] | undefined,
+  t: Transaction
+) {
+  const finalUrl = await resolveImageUrl(img, `items/${itemId}`, files);
   await ItemImage.create(
     {
       itemId,
-      url: finalUrl,                    // antes: img.url
+      url: finalUrl,
       alt: img.alt ?? null,
       sortOrder: img.sortOrder ?? 0,
       active: img.active ?? true,
@@ -190,5 +241,5 @@ export const deleteItem = async (id: number) =>
   withTx(async (t) => {
     const it = await ItemM.findByPk(id, { transaction: t });
     if (!it) throw new Err3("Item not found", 404);
-    await it.destroy({ transaction: t }); // 🔥 borra físicamente
+    await it.destroy({ transaction: t });
   });

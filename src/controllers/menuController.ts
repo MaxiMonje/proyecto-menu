@@ -27,10 +27,13 @@ export const getMenuById = async (req: Request, res: Response, next: NextFunctio
 
 /**
  * Crear un nuevo menú dentro del tenant actual
+ * ✅ Ahora soporta archivos (logo, backgroundImage)
  */
 export const createMenu = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const created = await menuService.createMenu(req.tenant!.id, req.body);
+    const userId = req.tenant!.id;
+    const files = (req.files ?? []) as Express.Multer.File[];
+    const created = await menuService.createMenu(userId, req.body, files);
     res.status(201).json(created);
   } catch (e) {
     next(e);
@@ -39,10 +42,13 @@ export const createMenu = async (req: Request, res: Response, next: NextFunction
 
 /**
  * Actualizar un menú existente dentro del tenant
+ * ✅ También soporta reemplazar logo/backgroundImage
  */
 export const updateMenu = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const updated = await menuService.updateMenu(req.tenant!.id, Number(req.params.id), req.body);
+    const userId = req.tenant!.id;
+    const files = (req.files ?? []) as Express.Multer.File[];
+    const updated = await menuService.updateMenu(userId, Number(req.params.id), req.body, files);
     res.json(updated);
   } catch (e) {
     next(e);

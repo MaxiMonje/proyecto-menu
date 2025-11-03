@@ -5,7 +5,8 @@ export interface MenuColorDto {
 }
 
 
-export interface CreateMenuDto { 
+export interface CreateMenuDto {
+    active: boolean; 
     title: string;
     logo?: string;
     backgroundImage?: string;
