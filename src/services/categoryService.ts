@@ -84,7 +84,7 @@ export const updateCategory = async (id: number, data: UpdateCategoryDto) => {
 
 export const deleteCategory = async (id: number) => {
   const it = await getCategoryById(id);
-  await it.update({ active: false });
+  await it.destroy();
 };
 
 /* ===========================
