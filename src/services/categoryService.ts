@@ -285,6 +285,7 @@ export const updateCategoryDeep = async (
           {
             categoryId: category.id,
             title: it.title!,
+            description: it.description || null,
             price: it.price!,
             active: typeof it.active === "boolean" ? it.active : true,
           },
