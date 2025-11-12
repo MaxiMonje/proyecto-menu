@@ -109,7 +109,7 @@ export const createCategoryDeep = async (userId: number, body: NewCategoryPayloa
     if (body.items?.length) {
       for (const it of body.items) {
         const item = await Item.create(
-          { categoryId: category.id, title: it.title, description: it.description ?? null , price: it.price, active: it.active ?? true },
+          { categoryId: category.id, title: it.title, description: typeof it.description === "undefined" ? null : it.description , price: it.price, active: it.active ?? true },
           { transaction: t }
         );
 
