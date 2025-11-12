@@ -109,7 +109,7 @@ export const createCategoryDeep = async (userId: number, body: NewCategoryPayloa
     if (body.items?.length) {
       for (const it of body.items) {
         const item = await Item.create(
-          { categoryId: category.id, title: it.title, price: it.price, active: it.active ?? true },
+          { categoryId: category.id, title: it.title, description: it.description , price: it.price, active: it.active ?? true },
           { transaction: t }
         );
 
@@ -221,7 +221,7 @@ export const updateCategoryDeep = async (
         if (typeof it.price === "number") itemPatch.price = it.price;
         if (typeof it.active === "boolean") itemPatch.active = it.active;
         if (typeof it.description !== "undefined") itemPatch.description = it.description;
-
+        
         if (Object.keys(itemPatch).length) {
           await item.update(itemPatch, { transaction: t });
         }
