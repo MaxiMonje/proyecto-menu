@@ -38,6 +38,9 @@ function pickFile(files: Express.Multer.File[] | undefined, field?: string) {
   return files.find(f => f.fieldname === field) ?? null;
 }
 
+const normalizeDescription = (desc?: string | null) =>
+  desc && desc.trim() !== "" ? desc : null;
+
 /**
  * Resuelve la URL final a guardar para una imagen:
  * - Si trae `fileField` y existe el archivo en `files`, sube a S3 con uploadImage y devuelve la URL S3/CDN.
@@ -109,7 +112,7 @@ export const createCategoryDeep = async (userId: number, body: NewCategoryPayloa
     if (body.items?.length) {
       for (const it of body.items) {
         const item = await Item.create(
-          { categoryId: category.id, title: it.title, description: typeof it.description === "undefined" ? null : it.description , price: it.price, active: it.active ?? true },
+          { categoryId: category.id, title: it.title, description: normalizeDescription(it.description), price: it.price, active: it.active ?? true },
           { transaction: t }
         );
 
@@ -220,8 +223,7 @@ export const updateCategoryDeep = async (
         if (typeof it.title === "string") itemPatch.title = it.title;
         if (typeof it.price === "number") itemPatch.price = it.price;
         if (typeof it.active === "boolean") itemPatch.active = it.active;
-        if (typeof it.description !== "undefined") itemPatch.description = it.description;
-
+        if (typeof it.description !== "undefined") itemPatch.description = normalizeDescription(it.description);
         if (Object.keys(itemPatch).length) {
           await item.update(itemPatch, { transaction: t });
         }
