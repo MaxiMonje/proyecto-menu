@@ -4,9 +4,6 @@ import ItemImage from "../models/ItemImage";
 import { CreateItemDto, UpdateItemDto } from "../dtos/item.dto";
 import { ApiError as Err3 } from "../utils/ApiError";
 import sequelize from "../utils/databaseService";
-
-// ⚠️ Ya no dependemos solo de toS3UrlFromExternal; si viene archivo, subimos con ImageS3Service
-// import { toS3UrlFromExternal } from "../utils/s3urlUtils";
 import { ImageS3Service } from "../s3-image-module";
 
 /* ===========================
@@ -23,9 +20,9 @@ function has<K extends string>(obj: any, key: K): obj is Record<K, unknown> {
 
 function imageBasePatch(img: any) {
   const patch: any = {};
-  if (has(img, "alt"))       patch.alt = img.alt;        // puede ser null a propósito
+  if (has(img, "alt")) patch.alt = img.alt;              // puede ser null a propósito
   if (has(img, "sortOrder")) patch.sortOrder = img.sortOrder;
-  if (has(img, "active"))    patch.active = img.active;
+  if (has(img, "active")) patch.active = img.active;
   return patch;
 }
 
@@ -35,7 +32,7 @@ function imageBasePatch(img: any) {
 
 function pickFile(files: Express.Multer.File[] | undefined, field?: string) {
   if (!files || !field) return null;
-  return files.find(f => f.fieldname === field) ?? null;
+  return files.find((f) => f.fieldname === field) ?? null;
 }
 
 /**
@@ -49,119 +46,209 @@ async function resolveImageUrl(
   folder: string,
   files?: Express.Multer.File[]
 ): Promise<string> {
-  const file = pickFile(files, img.fileField);
-  if (file) {
-    const up = await ImageS3Service.uploadImage(file as any, folder, { maxWidth: 1600, maxHeight: 1600 });
-    return up.url;
+  try {
+    const file = pickFile(files, img.fileField);
+    if (file) {
+      const up = await ImageS3Service.uploadImage(file as any, folder, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+      });
+
+      if (!up?.url) {
+        throw new Err3("Error al subir imagen a S3", 500, { folder, fileField: img.fileField });
+      }
+
+      return up.url;
+    }
+
+    if (img.url) {
+      // Mantenemos compatibilidad con URL directa
+      return img.url;
+    }
+
+    throw new Err3("Debe venir url o fileField en la imagen", 400);
+  } catch (err: any) {
+    // No filtramos nada sensible al cliente, el detalle real queda en `cause`
+    throw new Err3(
+      "Error procesando imagen del ítem",
+      500,
+      { folder, fileField: img.fileField, url: img.url },
+      err
+    );
   }
-  if (img.url) {
-    return img.url; // si querés forzar que todo sea archivo, tirá error acá
-    // // Ejemplo (opcional):
-    // throw new Err3("Solo se aceptan archivos (fileField), no URL directa", 400);
-  }
-  throw new Err3("Debe venir url o fileField", 400);
 }
 
 /* ===========================
  * Lecturas (sin soft delete)
  * =========================== */
 
-export const getAllItems = async () =>
-  ItemM.findAll({
-    order: [["id", "ASC"]],
-    include: [{
-      model: ItemImage,
-      as: "images",
-      required: false,
-      separate: true,
-      order: [["sortOrder", "ASC"], ["id", "ASC"]],
-    }],
-  });
+export const getAllItems = async () => {
+  try {
+    return await ItemM.findAll({
+      order: [["id", "ASC"]],
+      include: [
+        {
+          model: ItemImage,
+          as: "images",
+          required: false,
+          separate: true,
+          order: [
+            ["sortOrder", "ASC"],
+            ["id", "ASC"],
+          ],
+        },
+      ],
+    });
+  } catch (err: any) {
+    throw new Err3("Error al obtener ítems", 500, undefined, err);
+  }
+};
 
 export const getItemById = async (id: number, t?: Transaction) => {
-  const it = await ItemM.findOne({
-    where: { id },
-    include: [{
-      model: ItemImage,
-      as: "images",
-      required: false,
-      separate: true,
-      order: [["sortOrder", "ASC"], ["id", "ASC"]],
-    }],
-    transaction: t,
-  });
-  if (!it) throw new Err3("Item not found", 404);
-  return it;
+  if (!id) throw new Err3("ID de ítem inválido", 400);
+
+  try {
+    const it = await ItemM.findOne({
+      where: { id },
+      include: [
+        {
+          model: ItemImage,
+          as: "images",
+          required: false,
+          separate: true,
+          order: [
+            ["sortOrder", "ASC"],
+            ["id", "ASC"],
+          ],
+        },
+      ],
+      transaction: t,
+    });
+
+    if (!it) throw new Err3("Item no encontrado", 404, { id });
+
+    return it;
+  } catch (err: any) {
+    if (err instanceof Err3) throw err;
+    throw new Err3("Error al obtener el ítem", 500, { id }, err);
+  }
 };
 
 /* ===========================
  * Creación (ahora con archivos)
  * =========================== */
 
-export const createItem = async (data: CreateItemDto, files?: Express.Multer.File[]) =>
-  withTx(async (t) => {
-    const { images = [], ...rest } = data as any;
-    const it = await ItemM.create(rest as ItemCreationAttributes, { transaction: t });
+export const createItem = async (
+  data: CreateItemDto,
+  files?: Express.Multer.File[]
+) => {
+  // Validaciones mínimas
+  const anyData: any = data;
+  if (!anyData?.title) {
+    throw new Err3("El título del ítem es obligatorio", 400);
+  }
+  if (typeof anyData.price !== "number") {
+    throw new Err3("El precio del ítem es obligatorio y debe ser numérico", 400);
+  }
+  if (!anyData.categoryId) {
+    throw new Err3("categoryId es obligatorio para crear un ítem", 400);
+  }
 
-    if (images.length) {
-      const rows = await Promise.all(
-        images.map(async (img: any, idx: number) => {
-          const finalUrl = await resolveImageUrl(img, `items/${it.id}`, files);
-          return {
-            itemId: it.id,
-            url: finalUrl,
-            alt: img.alt ?? null,
-            sortOrder: img.sortOrder ?? idx,
-            active: img.active ?? true,
-          };
-        })
-      );
-      await ItemImage.bulkCreate(rows, { transaction: t });
-    }
+  try {
+    return await withTx(async (t) => {
+      const { images = [], ...rest } = anyData;
+      const it = await ItemM.create(rest as ItemCreationAttributes, { transaction: t });
 
-    await it.reload({
-      include: [{
-        model: ItemImage,
-        as: "images",
-        required: false,
-        separate: true,
-        order: [["sortOrder", "ASC"], ["id", "ASC"]],
-      }],
-      transaction: t,
+      if (images.length) {
+        const rows = await Promise.all(
+          images.map(async (img: any, idx: number) => {
+            const finalUrl = await resolveImageUrl(img, `items/${it.id}`, files);
+            return {
+              itemId: it.id,
+              url: finalUrl,
+              alt: img.alt ?? null,
+              sortOrder: img.sortOrder ?? idx,
+              active: img.active ?? true,
+            };
+          })
+        );
+        await ItemImage.bulkCreate(rows, { transaction: t });
+      }
+
+      await it.reload({
+        include: [
+          {
+            model: ItemImage,
+            as: "images",
+            required: false,
+            separate: true,
+            order: [
+              ["sortOrder", "ASC"],
+              ["id", "ASC"],
+            ],
+          },
+        ],
+        transaction: t,
+      });
+
+      return it;
     });
-    return it;
-  });
+  } catch (err: any) {
+    if (err instanceof Err3) throw err;
+    throw new Err3("Error al crear ítem", 500, undefined, err);
+  }
+};
 
 /* ===========================
  * Update — modular (HARD delete de imágenes nuevas con _delete)
  * =========================== */
 
-export const updateItem = async (id: number, data: UpdateItemDto, files?: Express.Multer.File[]) =>
-  withTx(async (t) => {
-    const it = await ItemM.findByPk(id, { transaction: t });
-    if (!it) throw new Err3("Item not found", 404);
+export const updateItem = async (
+  id: number,
+  data: UpdateItemDto,
+  files?: Express.Multer.File[]
+) => {
+  if (!id) throw new Err3("ID de ítem inválido", 400);
 
-    const { images, ...rest } = data as any;
-    if (rest && Object.keys(rest).length) {
-      await it.update(rest, { transaction: t });
-    }
+  try {
+    return await withTx(async (t) => {
+      const it = await ItemM.findByPk(id, { transaction: t });
+      if (!it) throw new Err3("Item no encontrado", 404, { id });
 
-    if (Array.isArray(images)) {
-      await upsertItemImages(id, images, files, t);
-    }
+      const anyData: any = data;
+      const { images, ...rest } = anyData;
 
-    await it.reload({
-      include: [{
-        model: ItemImage,
-        as: "images",
-        required: false,
-        separate: true,
-        order: [["sortOrder", "ASC"], ["id", "ASC"]],
-      }],
-      transaction: t,
+      if (rest && Object.keys(rest).length) {
+        await it.update(rest, { transaction: t });
+      }
+
+      if (Array.isArray(images)) {
+        await upsertItemImages(id, images, files, t);
+      }
+
+      await it.reload({
+        include: [
+          {
+            model: ItemImage,
+            as: "images",
+            required: false,
+            separate: true,
+            order: [
+              ["sortOrder", "ASC"],
+              ["id", "ASC"],
+            ],
+          },
+        ],
+        transaction: t,
+      });
+
+      return it;
     });
-    return it;
-  });
+  } catch (err: any) {
+    if (err instanceof Err3) throw err;
+    throw new Err3("Error al actualizar ítem", 500, { id }, err);
+  }
+};
 
 /* ===========================
  * Helpers específicos de imágenes
@@ -201,7 +288,7 @@ async function updateImagePartial(
 ) {
   const patch: any = imageBasePatch(img);
 
-  // 🧩 Subimos nueva imagen si vino `fileField` o nueva `url`
+  // Si vino nueva imagen (fileField o url), resolvemos url final (S3 / URL)
   if (img.url || img.fileField) {
     const finalUrl = await resolveImageUrl(img, `items/${itemId}`, files);
     patch.url = finalUrl;
@@ -214,6 +301,7 @@ async function updateImagePartial(
     transaction: t,
   });
 }
+
 async function createImage(
   itemId: number,
   img: any,
@@ -239,7 +327,10 @@ async function createImage(
 
 export const deleteItem = async (id: number) =>
   withTx(async (t) => {
+    if (!id) throw new Err3("ID de ítem inválido", 400);
+
     const it = await ItemM.findByPk(id, { transaction: t });
-    if (!it) throw new Err3("Item not found", 404);
+    if (!it) throw new Err3("Item no encontrado", 404, { id });
+
     await it.destroy({ transaction: t });
   });
