@@ -172,13 +172,42 @@ export const createCategoryDeep = async (
           { transaction: t }
         );
 
+        /// items
         if (it.images?.length) {
           const rows = await Promise.all(
             it.images.map(async (img) => {
-              const finalUrl = await resolveImageUrl(img, `items/${item.id}`, files);
+
+              let finalUrl: string; // <<--- AHORA ES SIEMPRE STRING
+
+              try {
+                finalUrl = await resolveImageUrl(img, `items/${item.id}`, files);
+              } catch (e) {
+                throw new ApiError(
+                  "Error al subir imagen",
+                  400,
+                  {
+                    fileField: img.fileField,
+                    alt: img.alt ?? null,
+                    error: (e as Error).message
+                  }
+                );
+              }
+
+              // Si resolveImageUrl devolviera algo vacío (muy raro, pero por seguridad)
+              if (!finalUrl) {
+                throw new ApiError(
+                  "Error al subir imagen",
+                  400,
+                  {
+                    fileField: img.fileField,
+                    alt: img.alt ?? null
+                  }
+                );
+              }
+
               return {
                 itemId: item.id,
-                url: finalUrl,
+                url: finalUrl,                 // <<--- finalUrl es string ✔
                 alt: img.alt ?? null,
                 sortOrder: img.sortOrder ?? 0,
                 active: true,
@@ -213,7 +242,9 @@ export const createCategoryDeep = async (
     throw new ApiError(
       "Error al crear categoría con ítems",
       e?.statusCode || 500,
-      { menuId: body.menuId },
+      { menuId: body.menuId,
+        original: e?.message
+       },
       e
     );
   }
@@ -222,6 +253,7 @@ export const createCategoryDeep = async (
 /* ===========================
  * Update Deep (con archivos)
  * =========================== */
+
 
 export const updateCategoryDeep = async (
   userId: number,
@@ -243,17 +275,24 @@ export const updateCategoryDeep = async (
       transaction: t,
       lock: t.LOCK.UPDATE,
     });
-    if (!menu) throw new ApiError("Menú no encontrado para el tenant actual", 404);
+    if (!menu) {
+      throw new ApiError("Menú no encontrado para el tenant actual", 404);
+    }
 
-    // Actualizar categoría
+    // -----------------------------
+    // PATCH de categoría
+    // -----------------------------
     const patchCategory: any = {};
     if (typeof body.title === "string") patchCategory.title = body.title;
     if (typeof body.active === "boolean") patchCategory.active = body.active;
+    // si tenés más campos opcionales, los agregás acá
+    // if (typeof body.description !== "undefined") patchCategory.description = body.description;
+
     if (Object.keys(patchCategory).length) {
       await category.update(patchCategory, { transaction: t });
     }
 
-    // Si no vienen items, devolvemos la categoría con hijos
+    // Si no vienen items, devolvemos la categoría actualizada con hijos y chau
     if (!body.items) {
       return await Category.findByPk(category.id, {
         transaction: t,
@@ -268,9 +307,11 @@ export const updateCategoryDeep = async (
       });
     }
 
-    const removeMissingItems = !!body.removeMissingItems;
-    const removeMissingImages = !!body.removeMissingImages;
+    // -----------------------------
+    // ITEMS
+    // -----------------------------
 
+    // Traemos los ítems existentes (para poder hacer update cuando venga id)
     const existingItems = await Item.findAll({
       where: { categoryId: category.id },
       transaction: t,
@@ -278,13 +319,14 @@ export const updateCategoryDeep = async (
       lock: t.LOCK.UPDATE,
     });
 
-    const existingItemIds = new Set(existingItems.map(i => i.id));
-    const seenItemIds = new Set<number>();
-
     for (const it of body.items) {
       if (it.id) {
+        // =========================
         // UPDATE de item existente
-        const item = existingItems.find(x => x.id === it.id && x.categoryId === category.id);
+        // =========================
+        const item = existingItems.find(
+          (x) => x.id === it.id && x.categoryId === category.id
+        );
         if (!item) {
           throw new ApiError(`Ítem ${it.id} no encontrado en esta categoría`, 404);
         }
@@ -300,69 +342,73 @@ export const updateCategoryDeep = async (
         if (Object.keys(itemPatch).length) {
           await item.update(itemPatch, { transaction: t });
         }
-        seenItemIds.add(item.id);
 
-        // Imágenes del ítem
+        // -----------------------------
+        // Imágenes del ítem (PATCH + CREATE, sin borrar)
+        // -----------------------------
         if (it.images) {
           const existingImages = (item as ItemWithImages).images ?? [];
-          const existingImgById = new Map<number, typeof existingImages[number]>();
+          const existingImgById = new Map<
+            number,
+            (typeof existingImages)[number]
+          >();
           for (const im of existingImages) existingImgById.set(im.id, im);
-
-          const seenImageIds = new Set<number>();
 
           for (const im of it.images) {
             if (im.id) {
+              // PATCH de imagen existente
               const found = existingImgById.get(im.id);
               if (!found) {
-                throw new ApiError(`Imagen ${im.id} no encontrada en item ${item.id}`, 404);
+                throw new ApiError(
+                  `Imagen ${im.id} no encontrada en item ${item.id}`,
+                  404
+                );
               }
 
               const imgPatch: any = {};
 
               if (typeof im.fileField === "string" || typeof im.url === "string") {
-                const finalUrl = await resolveImageUrl(im, `items/${item.id}`, files);
+                const finalUrl = await resolveImageUrl(
+                  im,
+                  `items/${item.id}`,
+                  files
+                );
                 imgPatch.url = finalUrl;
               }
               if (typeof im.alt !== "undefined") imgPatch.alt = im.alt;
-              if (typeof im.sortOrder === "number") imgPatch.sortOrder = im.sortOrder;
+              if (typeof im.sortOrder === "number") {
+                imgPatch.sortOrder = im.sortOrder;
+              }
               if (typeof im.active === "boolean") imgPatch.active = im.active;
 
               if (Object.keys(imgPatch).length) {
                 await found.update(imgPatch, { transaction: t });
               }
-              seenImageIds.add(found.id);
             } else {
               // CREATE de imagen nueva
-              const finalUrl = await resolveImageUrl(im, `items/${item.id}`, files);
-              const created = await ItemImage.create(
+              const finalUrl = await resolveImageUrl(
+                im,
+                `items/${item.id}`,
+                files
+              );
+              await ItemImage.create(
                 {
                   itemId: item.id,
                   url: finalUrl,
                   alt: typeof im.alt === "undefined" ? null : im.alt,
                   sortOrder: im.sortOrder ?? 0,
-                  active: typeof im.active === "boolean" ? im.active : true,
+                  active:
+                    typeof im.active === "boolean" ? im.active : true,
                 },
                 { transaction: t }
               );
-              seenImageIds.add(created.id);
-            }
-          }
-
-          // borrar imágenes faltantes si así se pide
-          if (removeMissingImages) {
-            const toDelete = existingImages
-              .filter(x => !seenImageIds.has(x.id))
-              .map(x => x.id);
-            if (toDelete.length) {
-              await ItemImage.destroy({
-                where: { id: { [Op.in]: toDelete } },
-                transaction: t,
-              });
             }
           }
         }
       } else {
+        // =========================
         // CREATE de item nuevo
+        // =========================
         if (!it.title || typeof it.price !== "number") {
           throw new ApiError("Cada nuevo ítem debe tener título y precio", 400);
         }
@@ -378,39 +424,31 @@ export const updateCategoryDeep = async (
           { transaction: t }
         );
 
+        // Crear imágenes nuevas si vienen
         if (it.images?.length) {
           const rows = await Promise.all(
             it.images.map(async (im) => {
-              const finalUrl = await resolveImageUrl(im, `items/${newItem.id}`, files);
+              const finalUrl = await resolveImageUrl(
+                im,
+                `items/${newItem.id}`,
+                files
+              );
               return {
                 itemId: newItem.id,
                 url: finalUrl,
                 alt: typeof im.alt === "undefined" ? null : im.alt,
                 sortOrder: im.sortOrder ?? 0,
-                active: typeof im.active === "boolean" ? im.active : true,
+                active:
+                  typeof im.active === "boolean" ? im.active : true,
               };
             })
           );
           await ItemImage.bulkCreate(rows, { transaction: t });
         }
-        seenItemIds.add(newItem.id);
       }
     }
 
-    // borrar ítems faltantes si se pide
-    if (removeMissingItems) {
-      const toDelete = [...existingItemIds].filter(id => !seenItemIds.has(id));
-      if (toDelete.length) {
-        await ItemImage.destroy({
-          where: { itemId: { [Op.in]: toDelete } },
-          transaction: t,
-        });
-        await Item.destroy({
-          where: { id: { [Op.in]: toDelete } },
-          transaction: t,
-        });
-      }
-    }
+    // Nada de borrar ítems/imágenes faltantes: lo que no vino, queda igual
 
     return await Category.findOne({
       where: { id: category.id },

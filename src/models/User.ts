@@ -67,7 +67,6 @@ User.init(
     email: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true, // si querés permitir reusar email con soft-delete, ver nota abajo
       validate: { isEmail: true },
     },
 
@@ -88,7 +87,7 @@ User.init(
     // Hash persistido (NOT NULL)
     passwordHash: { type: DataTypes.STRING(255), allowNull: false },
 
-    subdomain: { type: DataTypes.STRING, allowNull: false, unique: true},
+    subdomain: { type: DataTypes.STRING, allowNull: false,},
   },
   {
     sequelize,
@@ -142,6 +141,18 @@ User.init(
     // indexes: [
     //   { name: "uniq_users_email_active", unique: true, fields: ["email", "active"] },
     // ],
+    indexes: [
+      {
+        name: "users_email_unique",
+        unique: true,
+        fields: ["email"],
+      },
+      {
+        name: "users_subdomain_unique",
+        unique: true,
+        fields: ["subdomain"],
+      },
+    ],
   }
 );
 
