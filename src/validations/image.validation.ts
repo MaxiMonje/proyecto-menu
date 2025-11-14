@@ -1,12 +1,16 @@
 import { z } from "zod";
 
 export const createImageSchema = z.object({
-body: z.object({
-menuId: z.number().int().positive(),
-url: z.string().url().max(1024),
-}),
+  menuId: z
+    .coerce.number({ invalid_type_error: "menuId debe ser numérico" })
+    .int("menuId debe ser entero")
+    .positive("menuId debe ser mayor que 0"),
+  url: z
+    .string({ required_error: "La URL es obligatoria" })
+    .url("La URL no es válida"),
 });
+
 export const updateImageSchema = z.object({
-body: z.object({ url: z.string().url().max(1024).optional(), active: z.boolean().optional() }),
-params: z.object({ id: z.string().regex(/^\d+$/) }),
+  url: z.string().url("La URL no es válida").optional(),
+  active: z.boolean().optional(),
 });
