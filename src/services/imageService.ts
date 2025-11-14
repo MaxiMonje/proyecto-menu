@@ -2,6 +2,9 @@ import { Transaction } from "sequelize";
 import { ApiError } from "../utils/ApiError";
 import { Image as ImageM, ImageCreationAttributes } from "../models/Image";
 import ItemImage from "../models/ItemImage";
+import { Menu as MenuM } from "../models/Menu";
+import { Item as ItemM } from "../models/Item";
+import { Category as CategoryM } from "../models/Category";
 import sequelize from "../utils/databaseService";
 import { ImageS3Service } from "../s3-image-module";
 import { CreateImageDto, UpdateImageDto } from "../dtos/image.dto";
@@ -54,22 +57,81 @@ function imageBasePatch(img: any) {
   return patch;
 }
 
+async function withTx<T>(fn: (t: Transaction) => Promise<T>) {
+  return sequelize.transaction(fn);
+}
+
 /* ============================================================
-   A) CRUD genérico → tabla IMAGES
+   Helpers de tenant
    ============================================================ */
 
-export const getAllImages = async () => {
+/** Menú debe ser del usuario actual */
+async function assertMenuBelongsToUser(menuId: number, userId: number) {
+  const menu = await MenuM.findOne({
+    where: { id: menuId, userId, active: true },
+  });
+
+  if (!menu) {
+    throw new ApiError("No tenés permiso para usar este menú", 403);
+  }
+}
+
+/** Item debe ser del usuario actual (Item -> Category -> Menu.userId) */
+async function assertItemBelongsToUser(itemId: number, userId: number) {
+  const item = await ItemM.findOne({
+    where: { id: itemId, active: true },
+    include: [
+      {
+        model: CategoryM,
+        as: "category",
+        include: [
+          {
+            model: MenuM,
+            as: "menu",
+            where: { userId, active: true },
+          },
+        ],
+      },
+    ],
+  });
+
+  if (!item) {
+    throw new ApiError("Ítem no encontrado", 404);
+  }
+
+  return item;
+}
+
+/* ============================================================
+   A) CRUD genérico → tabla IMAGES (por menú, multi-tenant)
+   ============================================================ */
+
+export const getAllImages = async (userId: number) => {
   return await ImageM.findAll({
     where: { active: true },
+    include: [
+      {
+        model: MenuM,
+        as: "menu",
+        where: { userId, active: true },
+      },
+    ],
     order: [["id", "ASC"]],
   });
 };
 
-export const getImageById = async (id: number) => {
+export const getImageById = async (userId: number, id: number) => {
   if (!id) throw new ApiError("ID de imagen inválido", 400);
 
   const it = await ImageM.findOne({
     where: { id, active: true },
+    include: [
+      {
+        model: MenuM,
+        as: "menu",
+        where: { userId, active: true },
+      },
+    ],
   });
 
   if (!it) throw new ApiError("Imagen no encontrada", 404, { id });
@@ -77,22 +139,28 @@ export const getImageById = async (id: number) => {
   return it;
 };
 
-export const createImage = async (data: CreateImageDto) => {
+export const createImage = async (userId: number, data: CreateImageDto) => {
+  if (!data.menuId || !data.url) {
+    throw new ApiError("Datos incompletos para crear imagen", 400);
+  }
+
+  await assertMenuBelongsToUser(data.menuId, userId);
+
   return await ImageM.create(data as ImageCreationAttributes);
 };
 
-export const updateImage = async (id: number, data: UpdateImageDto) => {
-  if (!id) throw new ApiError("ID de imagen inválido", 400);
-
-  const it = await getImageById(id);
+export const updateImage = async (
+  userId: number,
+  id: number,
+  data: UpdateImageDto
+) => {
+  const it = await getImageById(userId, id);
   await it.update(data);
   return it;
 };
 
-export const deleteImage = async (id: number) => {
-  if (!id) throw new ApiError("ID de imagen inválido", 400);
-
-  const it = await getImageById(id);
+export const deleteImage = async (userId: number, id: number) => {
+  const it = await getImageById(userId, id);
   await it.update({ active: false });
 };
 
@@ -156,25 +224,30 @@ export const deleteItemImage = async (
 };
 
 /* ============================================================
-   C) UPSERT para listas de imágenes dentro de un ítem
+   C) UPSERT para listas de imágenes dentro de un ítem (multi-tenant)
    ============================================================ */
 
 export const upsertItemImages = async (
+  userId: number,
   itemId: number,
   images: any[],
-  files?: Express.Multer.File[],
-  t?: Transaction
+  files?: Express.Multer.File[]
 ) => {
-  for (const img of images) {
-    if (img._delete) {
-      await deleteItemImage(itemId, img.id, t);
-      continue;
-    }
+  // 🛡 El ítem tiene que ser del usuario actual
+  await assertItemBelongsToUser(itemId, userId);
 
-    if (img.id) {
-      await updateItemImage(itemId, img, files, t);
-    } else {
-      await createItemImage(itemId, img, files, t);
+  return await withTx(async (t) => {
+    for (const img of images) {
+      if (img._delete) {
+        await deleteItemImage(itemId, img.id, t);
+        continue;
+      }
+
+      if (img.id) {
+        await updateItemImage(itemId, img, files, t);
+      } else {
+        await createItemImage(itemId, img, files, t);
+      }
     }
-  }
+  });
 };

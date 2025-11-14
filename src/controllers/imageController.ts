@@ -1,100 +1,75 @@
-import { Request as R, Response as S, NextFunction as N } from "express";
+import { Request, Response, NextFunction } from "express";
 import * as imageService from "../services/imageService";
-import { getItemById } from "../services/itemService";
-import { ApiError } from "../utils/ApiError";
 
-/* ============================================================
-   CRUD genérico de tabla IMAGES
-   ============================================================ */
-
-export const getAllImages = async (_: R, res: S, next: N) => {
+export const getAllImages = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(await imageService.getAllImages());
+    const userId = req.tenant!.id;
+    const imgs = await imageService.getAllImages(userId);
+    res.json(imgs);
   } catch (e) {
     next(e);
   }
 };
 
-export const getImageById = async (req: R, res: S, next: N) => {
+export const getImageById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(await imageService.getImageById(Number(req.params.id)));
+    const userId = req.tenant!.id;
+    const id = Number(req.params.id);
+    const img = await imageService.getImageById(userId, id);
+    res.json(img);
   } catch (e) {
     next(e);
   }
 };
 
-export const createImage = async (req: R, res: S, next: N) => {
+export const createImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const created = await imageService.createImage(req.body);
+    const userId = req.tenant!.id;
+    const created = await imageService.createImage(userId, req.body);
     res.status(201).json(created);
   } catch (e) {
     next(e);
   }
 };
 
-export const updateImage = async (req: R, res: S, next: N) => {
+export const updateImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const updated = await imageService.updateImage(
-      Number(req.params.id),
-      req.body
-    );
+    const userId = req.tenant!.id;
+    const id = Number(req.params.id);
+    const updated = await imageService.updateImage(userId, id, req.body);
     res.json(updated);
   } catch (e) {
     next(e);
   }
 };
 
-export const deleteImage = async (req: R, res: S, next: N) => {
+export const deleteImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await imageService.deleteImage(Number(req.params.id));
+    const userId = req.tenant!.id;
+    const id = Number(req.params.id);
+    await imageService.deleteImage(userId, id);
     res.status(204).send();
   } catch (e) {
     next(e);
   }
 };
 
-/* ============================================================
-   NUEVO — Upsert ItemImages (subir archivos a S3)
-   ============================================================ */
+/* ========= Imágenes de ÍTEMS ========= */
 
 export const upsertItemImagesController = async (
-  req: R,
-  res: S,
-  next: N
+  req: Request,
+  res: Response,
+  next: NextFunction
 ) => {
   try {
+    const userId = req.tenant!.id;
     const itemId = Number(req.params.itemId);
-    if (!itemId) throw new ApiError("ID de ítem inválido", 400);
+    const images = (req.body.images ?? []) as any[];
+    const files = (req.files ?? []) as Express.Multer.File[];
 
-    let images = (req.body as any).images;
+    await imageService.upsertItemImages(userId, itemId, images, files);
 
-    if (!images) {
-      throw new ApiError("El campo 'images' es obligatorio", 400);
-    }
-
-    // Si viene como string (form-data)
-    if (typeof images === "string") {
-      try {
-        images = JSON.parse(images);
-      } catch {
-        throw new ApiError("El campo 'images' debe ser JSON válido", 400);
-      }
-    }
-
-    if (!Array.isArray(images)) {
-      throw new ApiError("'images' debe ser un array", 400);
-    }
-
-    // Ejecuta el upsert en S3 + DB
-    await imageService.upsertItemImages(
-      itemId,
-      images,
-      req.files as Express.Multer.File[]
-    );
-
-    // Devolver el item actualizado con las imágenes nuevas
-    const item = await getItemById(itemId);
-    res.json(item);
+    res.status(200).json({ ok: true });
   } catch (e) {
     next(e);
   }

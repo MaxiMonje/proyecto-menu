@@ -8,6 +8,7 @@ export interface CreateItemDto {
 }
 
 export interface UpdateItemDto {
+  categoryId: any;
   title?: string;
   description?: string | null;
   price?: number;

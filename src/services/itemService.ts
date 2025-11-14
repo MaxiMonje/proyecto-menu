@@ -1,178 +1,170 @@
 import { Transaction } from "sequelize";
-import { Item as ItemM, ItemCreationAttributes } from "../models/Item";
-import ItemImage from "../models/ItemImage";
-import { CreateItemDto, UpdateItemDto } from "../dtos/item.dto";
-import { ApiError as Err3 } from "../utils/ApiError";
 import sequelize from "../utils/databaseService";
 
-/* ===========================
- * Helpers genéricos
- * =========================== */
+import { Item as ItemM, ItemCreationAttributes } from "../models/Item";
+import { Category as CategoryM } from "../models/Category";
+import { Menu as MenuM } from "../models/Menu";
+import ItemImage from "../models/ItemImage";
 
+import { CreateItemDto, UpdateItemDto } from "../dtos/item.dto";
+import { ApiError } from "../utils/ApiError";
+
+/* ===========================
+ * Helper genérico de TX
+ * =========================== */
 async function withTx<T>(fn: (t: Transaction) => Promise<T>) {
   return sequelize.transaction(fn);
 }
 
 /* ===========================
- * Lecturas
+ * Helpers de tenant
  * =========================== */
 
-export const getAllItems = async () => {
+/**
+ * Verifica que la categoría pertenezca a un menú del usuario (tenant).
+ * Si no es así, tira 403.
+ */
+async function assertCategoryBelongsToUser(categoryId: number, userId: number) {
+  const category = await CategoryM.findOne({
+    where: { id: categoryId, active: true },
+    include: [
+      {
+        model: MenuM,
+        as: "menu",
+        where: { userId, active: true },
+      },
+    ],
+  });
+
+  if (!category) {
+    throw new ApiError("No tenés permiso para usar esta categoría", 403);
+  }
+}
+
+/**
+ * Busca un ítem por ID asegurando que pertenezca al usuario (tenant),
+ * navegando Item -> Category -> Menu.userId.
+ */
+async function findItemForUser(userId: number, itemId: number) {
+  if (!itemId) throw new ApiError("ID de ítem inválido", 400);
+
+  const item = await ItemM.findOne({
+    where: { id: itemId, active: true },
+    include: [
+      {
+        model: CategoryM,
+        as: "category",
+        include: [
+          {
+            model: MenuM,
+            as: "menu",
+            where: { userId, active: true },
+          },
+        ],
+      },
+      {
+        model: ItemImage,
+        as: "images",
+        separate: true,
+        order: [["sortOrder", "ASC"]],
+      },
+    ],
+  });
+
+  if (!item) {
+    throw new ApiError("Ítem no encontrado", 404);
+  }
+
+  return item;
+}
+
+/* ===========================
+ * CRUD con tenant
+ * =========================== */
+
+export const getAllItems = async (userId: number) => {
   try {
     return await ItemM.findAll({
+      where: { active: true },
+      include: [
+        {
+          model: CategoryM,
+          as: "category",
+          include: [
+            {
+              model: MenuM,
+              as: "menu",
+              where: { userId, active: true },
+            },
+          ],
+        },
+        {
+          model: ItemImage,
+          as: "images",
+          separate: true,
+          order: [["sortOrder", "ASC"]],
+        },
+      ],
       order: [["id", "ASC"]],
-      include: [
-        {
-          model: ItemImage,
-          as: "images",
-          required: false,
-          separate: true,
-          order: [
-            ["sortOrder", "ASC"],
-            ["id", "ASC"],
-          ],
-        },
-      ],
     });
-  } catch (err: any) {
-    throw new Err3("Error al obtener ítems", 500, undefined, err);
+  } catch (e: any) {
+    throw new ApiError("Error al obtener ítems", 500, undefined, e);
   }
 };
 
-export const getItemById = async (id: number, t?: Transaction) => {
-  if (!id) throw new Err3("ID de ítem inválido", 400);
-
-  try {
-    const it = await ItemM.findOne({
-      where: { id },
-      include: [
-        {
-          model: ItemImage,
-          as: "images",
-          required: false,
-          separate: true,
-          order: [
-            ["sortOrder", "ASC"],
-            ["id", "ASC"],
-          ],
-        },
-      ],
-      transaction: t,
-    });
-
-    if (!it) throw new Err3("Item no encontrado", 404, { id });
-
-    return it;
-  } catch (err: any) {
-    if (err instanceof Err3) throw err;
-    throw new Err3("Error al obtener el ítem", 500, { id }, err);
-  }
+export const getItemById = async (userId: number, id: number) => {
+  return findItemForUser(userId, id);
 };
 
-/* ===========================
- * Creación (SOLO ítem)
- * =========================== */
+export const createItem = async (userId: number, data: CreateItemDto) => {
+  if (!data.categoryId || !data.title || typeof data.price !== "number") {
+    throw new ApiError("Datos incompletos para crear ítem", 400);
+  }
 
-export const createItem = async (data: CreateItemDto) => {
-  const anyData: any = data;
-  if (!anyData?.title) {
-    throw new Err3("El título del ítem es obligatorio", 400);
-  }
-  if (typeof anyData.price !== "number") {
-    throw new Err3(
-      "El precio del ítem es obligatorio y debe ser numérico",
-      400
-    );
-  }
-  if (!anyData.categoryId) {
-    throw new Err3("categoryId es obligatorio para crear un ítem", 400);
-  }
+  // 🛡 chequeamos que la categoría cuelgue de un menú del usuario actual
+  await assertCategoryBelongsToUser(data.categoryId, userId);
 
   try {
     return await withTx(async (t) => {
-      const it = await ItemM.create(
-        anyData as ItemCreationAttributes,
-        { transaction: t }
-      );
-
-      // Opcional: recargar con imágenes asociadas (aunque no creemos ninguna acá)
-      await it.reload({
-        include: [
-          {
-            model: ItemImage,
-            as: "images",
-            required: false,
-            separate: true,
-            order: [
-              ["sortOrder", "ASC"],
-              ["id", "ASC"],
-            ],
-          },
-        ],
-        transaction: t,
-      });
-
-      return it;
+      const created = await ItemM.create(data as ItemCreationAttributes, { transaction: t });
+      return created;
     });
-  } catch (err: any) {
-    if (err instanceof Err3) throw err;
-    throw new Err3("Error al crear ítem", 500, undefined, err);
+  } catch (e: any) {
+    throw new ApiError("Error al crear ítem", 500, undefined, e);
   }
 };
 
-/* ===========================
- * Update (SOLO campos del ítem)
- * =========================== */
+export const updateItem = async (
+  userId: number,
+  id: number,
+  data: UpdateItemDto
+) => {
+  // 🛡 aseguramos que el ítem sea del usuario actual
+  const item = await findItemForUser(userId, id);
 
-export const updateItem = async (id: number, data: UpdateItemDto) => {
-  if (!id) throw new Err3("ID de ítem inválido", 400);
+  // si en algún momento permitís cambiar de categoría, habría que validar la nueva:
+  if (data.categoryId) {
+    await assertCategoryBelongsToUser(data.categoryId as any, userId);
+  }
 
   try {
-    return await withTx(async (t) => {
-      const it = await ItemM.findByPk(id, { transaction: t });
-      if (!it) throw new Err3("Item no encontrado", 404, { id });
-
-      const anyData: any = data;
-      const { images, ...rest } = anyData; // ignoramos images acá a propósito
-
-      if (rest && Object.keys(rest).length) {
-        await it.update(rest, { transaction: t });
-      }
-
-      await it.reload({
-        include: [
-          {
-            model: ItemImage,
-            as: "images",
-            required: false,
-            separate: true,
-            order: [
-              ["sortOrder", "ASC"],
-              ["id", "ASC"],
-            ],
-          },
-        ],
-        transaction: t,
-      });
-
-      return it;
-    });
-  } catch (err: any) {
-    if (err instanceof Err3) throw err;
-    throw new Err3("Error al actualizar ítem", 500, { id }, err);
+    await item.update(data);
+    return item;
+  } catch (e: any) {
+    throw new ApiError("Error al actualizar ítem", 500, undefined, e);
   }
 };
 
-/* ===========================
- * Eliminación de Item
- * =========================== */
+export const deleteItem = async (userId: number, id: number) => {
+  const item = await findItemForUser(userId, id);
 
-export const deleteItem = async (id: number) =>
-  withTx(async (t) => {
-    if (!id) throw new Err3("ID de ítem inválido", 400);
-
-    const it = await ItemM.findByPk(id, { transaction: t });
-    if (!it) throw new Err3("Item no encontrado", 404, { id });
-
-    await it.destroy({ transaction: t });
-  });
+  try {
+    await withTx(async (t) => {
+      // si querés borrar también las imágenes relacionadas:
+      await ItemImage.destroy({ where: { itemId: item.id }, transaction: t });
+      await item.destroy({ transaction: t });
+    });
+  } catch (e: any) {
+    throw new ApiError("Error al eliminar ítem", 500, undefined, e);
+  }
+};
