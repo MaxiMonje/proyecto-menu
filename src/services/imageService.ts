@@ -15,7 +15,15 @@ import { CreateImageDto, UpdateImageDto } from "../dtos/image.dto";
 
 function pickFile(files: Express.Multer.File[] | undefined, field?: string) {
   if (!files || !field) return null;
-  return files.find((f) => f.fieldname === field) ?? null;
+
+  const f = files.find((f) => f.fieldname === field) ?? null;
+  if (!f) return null;
+
+  // 🛡️ Protege contra archivos vacíos enviados por Postman
+  // Si el archivo no tiene tamaño, lo tratamos como que NO existe
+  if (!f.size) return null;
+
+  return f;
 }
 
 async function resolveImageUrl(
@@ -25,21 +33,37 @@ async function resolveImageUrl(
 ): Promise<string> {
   try {
     const file = pickFile(files, img.fileField);
+
     if (file) {
       const up = await ImageS3Service.uploadImage(file as any, folder, {
         maxWidth: 1600,
         maxHeight: 1600,
       });
 
-      if (!up?.url) throw new ApiError("Error al subir imagen a S3", 500);
+      if (!up?.url) {
+        throw new ApiError("Error al subir imagen a S3", 500, {
+          fileField: img.fileField ?? null,
+        });
+      }
 
       return up.url;
     }
 
+    // Si no hay archivo pero sí url -> usamos url
     if (img.url) return img.url;
 
-    throw new ApiError("Debe venir url o fileField", 400);
+    // ⬇⬇ Validación real: ni file ni url
+    throw new ApiError("Debe venir url o fileField", 400, {
+      fileField: img.fileField ?? null,
+      url: img.url ?? null,
+    });
   } catch (err: any) {
+    // Si ya es un ApiError nuestro, lo dejamos pasar tal cual
+    if (err instanceof ApiError) {
+      throw err;
+    }
+
+    // Errores desconocidos -> 500 genérico
     throw new ApiError(
       "Error procesando imagen",
       500,

@@ -1,8 +1,9 @@
 import { Router as R2 } from "express";
-import { validate as v2 } from "../middlewares/validate";
-import { createImageSchema, updateImageSchema } from "../validations/image.validation";
+import { validate as v2, validate } from "../middlewares/validate";
+import { createImageSchema, updateImageSchema, upsertItemImagesBodySchema } from "../validations/image.validation";
 import { getAllImages, getImageById, createImage, updateImage, deleteImage, upsertItemImagesController } from "../controllers/imageController";
 import multer from "multer";
+import { parseMultipartPayload } from "../middlewares/parseMulti";
 
 
 const imageRouter = R2();
@@ -16,8 +17,10 @@ imageRouter.delete("/:id", deleteImage);
 
 imageRouter.put(
     "/items/:itemId",
-    upload.any(),               // para recibir archivos (Multer)
-    upsertItemImagesController  // controller que definimos abajo
+    upload.any(),                     
+    parseMultipartPayload,             
+    validate(upsertItemImagesBodySchema),  
+    upsertItemImagesController  
 );
 
 export default imageRouter;
