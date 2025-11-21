@@ -117,7 +117,7 @@ export const getItemById = async (userId: number, id: number) => {
 };
 
 export const createItem = async (userId: number, data: CreateItemDto) => {
-  if (!data.categoryId || !data.title || typeof data.price !== "number") {
+  if (!data.categoryId || !data.title) {
     throw new ApiError("Datos incompletos para crear ítem", 400);
   }
 

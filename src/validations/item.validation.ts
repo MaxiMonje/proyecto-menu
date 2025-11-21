@@ -5,6 +5,10 @@ import {
   zBooleanLoose,
 } from "./emptyspaces"; // ajustá el path según tu estructura
 
+const priceSchema = z
+  .coerce.number({ invalid_type_error: "price debe ser numérico" })
+  .nonnegative("price no puede ser negativo");
+
 export const createItemSchema = z.object({
   categoryId: z
     .coerce.number({ invalid_type_error: "categoryId debe ser numérico" })
@@ -17,10 +21,8 @@ export const createItemSchema = z.object({
   // "" o "   " -> null; respeta máximo 10_000 chars
   description: zOptionalString(10_000),
 
-  // tolerante a "123.45" como string
-  price: z
-    .coerce.number({ invalid_type_error: "price debe ser numérico" })
-    .nonnegative("price no puede ser negativo"),
+  // tolerante a "123.45" como string, pero opcional
+  price: priceSchema.nullable().optional(),
 
   // acepta true/false/"true"/"false"
   active: zBooleanLoose,
@@ -35,10 +37,7 @@ export const updateItemSchema = z.object({
   // opcional, "" -> null
   description: zOptionalString(10_000),
 
-  price: z
-    .coerce.number({ invalid_type_error: "price debe ser numérico" })
-    .nonnegative("price no puede ser negativo")
-    .optional(),
+  price: priceSchema.nullable().optional(),
 
   active: zBooleanLoose,
 
