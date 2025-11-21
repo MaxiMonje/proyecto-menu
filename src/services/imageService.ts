@@ -178,9 +178,33 @@ export const updateImage = async (
   id: number,
   data: UpdateImageDto
 ) => {
-  const it = await getImageById(userId, id);
-  await it.update(data);
-  return it;
+  if (!userId) throw new ApiError("ID de usuario (tenant) inválido", 400);
+  if (!id) throw new ApiError("ID de imagen inválido", 400);
+
+  try {
+    // 👇 NO filtramos por active
+    const img = await ImageM.findOne({
+      where: { id },
+      include: [
+        {
+          model: MenuM,
+          as: "menu",
+          where: { userId }, // validación multi-tenant
+        },
+      ],
+    });
+
+    if (!img) {
+      throw new ApiError("Image not found", 404, { userId, id });
+    }
+
+    await img.update(data);
+
+    return img;
+  } catch (e: any) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError("Error al actualizar imagen", 500, undefined, e);
+  }
 };
 
 export const deleteImage = async (userId: number, id: number) => {
