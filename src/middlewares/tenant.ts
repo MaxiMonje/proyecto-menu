@@ -6,8 +6,8 @@ declare global {
     interface Request {
       tenant?: {
         id: number;
-        subdomain: string;
-        user : User;
+        subdomain: string | null;   // ✔ ahora acepta null
+        user: User;
       };
     }
   }
@@ -27,8 +27,9 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
 
     subdomain = subdomain.toLowerCase();
 
+    // Buscamos usuario dueño del tenant (solo activos)
     const user = await User.findOne({
-      where: { subdomain, active: true },
+      where: { subdomain, active: true }, // este match sí exige string real
     });
 
     if (!user) {
@@ -37,7 +38,7 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
     
     req.tenant = {
       id: user.id,
-      subdomain: user.subdomain,
+      subdomain: user.subdomain ?? null,  // ✔ FIX (puede ser null)
       user,
     };
 
