@@ -1,4 +1,5 @@
 import { Transaction } from "sequelize";
+import { URL } from "url";
 import { ApiError } from "../utils/ApiError";
 import { Image as ImageM, ImageCreationAttributes } from "../models/Image";
 import ItemImage from "../models/ItemImage";
@@ -70,6 +71,27 @@ async function resolveImageUrl(
       { fileField: img.fileField ?? null, url: img.url ?? null },
       err
     );
+  }
+}
+
+function extractS3KeyFromUrl(imageUrl?: string | null) {
+  if (!imageUrl) return null;
+  try {
+    const parsed = new URL(imageUrl);
+    const key = parsed.pathname.replace(/^\/+/, "");
+    return key || null;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteImageFromS3(imageUrl?: string | null) {
+  const key = extractS3KeyFromUrl(imageUrl);
+  if (!key) return;
+
+  const deleted = await ImageS3Service.deleteImage(key);
+  if (!deleted) {
+    throw new ApiError("No se pudo eliminar la imagen en S3", 500, { key, imageUrl });
   }
 }
 
@@ -209,6 +231,7 @@ export const updateImage = async (
 
 export const deleteImage = async (userId: number, id: number) => {
   const it = await getImageById(userId, id);
+  await deleteImageFromS3(it.url);
   await it.update({ active: false });
 };
 
@@ -265,10 +288,17 @@ export const deleteItemImage = async (
   imgId: number,
   t?: Transaction
 ) => {
-  return await ItemImage.destroy({
+  const image = await ItemImage.findOne({
     where: { id: imgId, itemId },
     transaction: t,
   });
+
+  if (!image) {
+    throw new ApiError("Imagen de ítem no encontrada", 404, { itemId, imgId });
+  }
+
+  await deleteImageFromS3(image.url);
+  await image.destroy({ transaction: t });
 };
 
 /* ============================================================
