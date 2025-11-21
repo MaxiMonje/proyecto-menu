@@ -5,6 +5,8 @@ import { Item as ItemM, ItemCreationAttributes } from "../models/Item";
 import { Category as CategoryM } from "../models/Category";
 import { Menu as MenuM } from "../models/Menu";
 import ItemImage from "../models/ItemImage";
+import { URL } from "url";
+import { ImageS3Service } from "../s3-image-module";
 
 import { CreateItemDto, UpdateItemDto } from "../dtos/item.dto";
 import { ApiError } from "../utils/ApiError";
@@ -78,13 +80,43 @@ async function findItemForUser(userId: number, itemId: number) {
   return item;
 }
 
+function formatItemResponse(item: ItemM) {
+  const plain = item.get({ plain: true }) as any;
+  delete plain.category;
+  return plain;
+}
+
+function extractS3Key(imageUrl?: string | null) {
+  if (!imageUrl) return null;
+  try {
+    const parsed = new URL(imageUrl);
+    const key = parsed.pathname.replace(/^\/+/, "");
+    return key || null;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteImageFromS3(imageUrl?: string | null) {
+  const key = extractS3Key(imageUrl);
+  if (!key) return;
+  await ImageS3Service.deleteImage(key);
+}
+
+async function deleteItemImagesFromS3(images?: ItemImage[]) {
+  if (!Array.isArray(images)) return;
+  for (const image of images) {
+    await deleteImageFromS3(image?.url);
+  }
+}
+
 /* ===========================
  * CRUD con tenant
  * =========================== */
 
 export const getAllItems = async (userId: number) => {
   try {
-    return await ItemM.findAll({
+    const items = await ItemM.findAll({
       where: { active: true },
       include: [
         {
@@ -107,13 +139,16 @@ export const getAllItems = async (userId: number) => {
       ],
       order: [["id", "ASC"]],
     });
+
+    return items.map(formatItemResponse);
   } catch (e: any) {
     throw new ApiError("Error al obtener ítems", 500, undefined, e);
   }
 };
 
 export const getItemById = async (userId: number, id: number) => {
-  return findItemForUser(userId, id);
+  const item = await findItemForUser(userId, id);
+  return formatItemResponse(item);
 };
 
 export const createItem = async (userId: number, data: CreateItemDto) => {
@@ -127,7 +162,7 @@ export const createItem = async (userId: number, data: CreateItemDto) => {
   try {
     return await withTx(async (t) => {
       const created = await ItemM.create(data as ItemCreationAttributes, { transaction: t });
-      return created;
+      return formatItemResponse(created);
     });
   } catch (e: any) {
     throw new ApiError("Error al crear ítem", 500, undefined, e);
@@ -171,7 +206,7 @@ export const updateItem = async (
     }
 
     await item.update(data);
-    return item;
+    return formatItemResponse(item);
   } catch (e: any) {
     if (e instanceof ApiError) throw e;
     throw new ApiError("Error al actualizar ítem", 500, undefined, e);
@@ -182,6 +217,7 @@ export const deleteItem = async (userId: number, id: number) => {
   const item = await findItemForUser(userId, id);
 
   try {
+    await deleteItemImagesFromS3(((item as any).images ?? []) as ItemImage[]);
     await withTx(async (t) => {
       // si querés borrar también las imágenes relacionadas:
       await ItemImage.destroy({ where: { itemId: item.id }, transaction: t });

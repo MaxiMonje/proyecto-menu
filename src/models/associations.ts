@@ -17,16 +17,16 @@ export const setupAssociations = () => {
   User.hasMany(Payment, { foreignKey: "userId", as: "payments" });
   Payment.belongsTo(User, { foreignKey: "userId", as: "user" });
 
-  MenuA.hasMany(CategoryA, { foreignKey: "menuId", as: "categories" });
-  CategoryA.belongsTo(MenuA, { foreignKey: "menuId", as: "menu" });
+  MenuA.hasMany(CategoryA, { foreignKey: "menuId", as: "categories", onDelete: "CASCADE", hooks: true });
+  CategoryA.belongsTo(MenuA, { foreignKey: "menuId", as: "menu", onDelete: "CASCADE" });
 
 
   MenuA.hasMany(ImageA, { foreignKey: "menuId", as: "images" });
   ImageA.belongsTo(MenuA, { foreignKey: "menuId", as: "menu" });
 
 
-  CategoryA.hasMany(ItemA, { foreignKey: "categoryId", as: "items" });
-  ItemA.belongsTo(CategoryA, { foreignKey: "categoryId", as: "category" });
+  CategoryA.hasMany(ItemA, { foreignKey: "categoryId", as: "items", onDelete: "CASCADE", hooks: true });
+  ItemA.belongsTo(CategoryA, { foreignKey: "categoryId", as: "category", onDelete: "CASCADE" });
 
   // Item 1–N ItemImage
   ItemA.hasMany(ItemImage, { as: "images", foreignKey: "itemId", onDelete: "CASCADE", hooks: true,});

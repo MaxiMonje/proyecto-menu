@@ -1,5 +1,11 @@
 import { Category as CategoryM, CategoryCreationAttributes } from "../models/Category";
 import { Menu as MenuM } from "../models/Menu";
+import { Item as ItemM } from "../models/Item";
+import ItemImage from "../models/ItemImage";
+import { Transaction } from "sequelize";
+import sequelize from "../utils/databaseService";
+import { URL } from "url";
+import { ImageS3Service } from "../s3-image-module";
 import { CreateCategoryDto, UpdateCategoryDto } from "../dtos/category.dto";
 import { ApiError } from "../utils/ApiError";
 
@@ -25,23 +31,125 @@ async function assertMenuBelongsToUser(menuId: number, userId: number) {
   }
 }
 
+interface FindCategoryOptions {
+  includeItems?: boolean;
+  activeOnly?: boolean;
+}
+
+function buildItemsInclude() {
+  return {
+    model: ItemM,
+    as: "items",
+    required: false,
+    include: [
+      {
+        model: ItemImage,
+        as: "images",
+        required: false,
+      },
+    ],
+  };
+}
+
+async function findCategoryForUser(
+  userId: number,
+  id: number,
+  options: FindCategoryOptions = {}
+) {
+  const { includeItems = false, activeOnly = false } = options;
+  const include: any[] = [
+    {
+      model: MenuM,
+      as: "menu",
+      where: { userId },
+      attributes: [],
+    },
+  ];
+
+  if (includeItems) {
+    include.push(buildItemsInclude());
+  }
+
+  const where: any = { id };
+  if (activeOnly) where.active = true;
+
+  const category = await CategoryM.findOne({
+    where,
+    include,
+  });
+
+  if (!category) {
+    throw new ApiError("Categoría no encontrada", 404);
+  }
+
+  return category;
+}
+
+function formatCategoryResponse(category: CategoryM) {
+  const plain = category.get({ plain: true }) as any;
+  delete plain.menu;
+  delete plain.items;
+  return plain;
+}
+
+function extractS3Key(imageUrl?: string | null) {
+  if (!imageUrl) return null;
+  try {
+    const parsed = new URL(imageUrl);
+    const key = parsed.pathname.replace(/^\/+/, "");
+    return key || null;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteImageFromS3(imageUrl?: string | null) {
+  const key = extractS3Key(imageUrl);
+  if (!key) return;
+  await ImageS3Service.deleteImage(key);
+}
+
+async function deleteItemImages(
+  item: ItemM & { images?: ItemImage[] },
+  t?: Transaction
+) {
+  if (!Array.isArray(item.images)) return;
+  for (const image of item.images) {
+    await deleteImageFromS3(image?.url);
+    await image.destroy({ transaction: t });
+  }
+}
+
+async function deleteItemsForCategory(
+  category: CategoryM & { items?: ItemM[] },
+  t?: Transaction
+) {
+  if (!Array.isArray(category.items)) return;
+  for (const item of category.items) {
+    await deleteItemImages(item as any, t);
+    await item.destroy({ transaction: t });
+  }
+}
+
 /* ===========================
  * CRUD base con tenant
  * =========================== */
 
 export const getAllCategories = async (userId: number) => {
   try {
-    return await CategoryM.findAll({
+    const categories = await CategoryM.findAll({
       where: { active: true },
       include: [
         {
           model: MenuM,
-          as: "menu",       // <-- asegurate de tener Category.belongsTo(Menu, { as: "menu", foreignKey: "menuId" })
-          where: { userId }, // solo menús del usuario actual
+          as: "menu",
+          where: { userId },
+          attributes: [],
         },
       ],
       order: [["id", "ASC"]],
     });
+    return categories.map(formatCategoryResponse);
   } catch (e: any) {
     throw new ApiError("Error al obtener categorías", 500, undefined, e);
   }
@@ -50,19 +158,8 @@ export const getAllCategories = async (userId: number) => {
 export const getCategoryById = async (userId: number, id: number) => {
   if (!id) throw new ApiError("ID de categoría inválido", 400);
 
-  const it = await CategoryM.findOne({
-    where: { id, active: true },
-    include: [
-      {
-        model: MenuM,
-        as: "menu",
-        where: { userId },
-      },
-    ],
-  });
-
-  if (!it) throw new ApiError("Categoría no encontrada", 404);
-  return it;
+  const category = await findCategoryForUser(userId, id, { activeOnly: true });
+  return formatCategoryResponse(category);
 };
 
 export const createCategory = async (userId: number, data: CreateCategoryDto) => {
@@ -74,7 +171,8 @@ export const createCategory = async (userId: number, data: CreateCategoryDto) =>
   await assertMenuBelongsToUser(data.menuId, userId);
 
   try {
-    return await CategoryM.create(data as CategoryCreationAttributes);
+    const created = await CategoryM.create(data as CategoryCreationAttributes);
+    return formatCategoryResponse(created);
   } catch (e: any) {
     throw new ApiError("Error al crear categoría", 500, undefined, e);
   }
@@ -86,35 +184,27 @@ export const updateCategory = async (
   data: UpdateCategoryDto
 ) => {
   try {
-    // 👇 Ahora buscamos la categoría por ID SIN filtrar por active
-    const it = await CategoryM.findOne({
-      where: { id },
-      include: [
-        {
-          model: MenuM,
-          as: "menu",
-          where: { userId }, // validamos multi-tenant
-        },
-      ],
-    });
-
-    if (!it) {
-      throw new ApiError("Category not found", 404, { userId, id });
-    }
+    const it = await findCategoryForUser(userId, id, { activeOnly: false });
 
     // Aplicar patch (acepta active true o false)
     await it.update(data);
 
-    return it;
+    return formatCategoryResponse(it);
   } catch (e: any) {
     throw new ApiError("Error al actualizar categoría", 500, undefined, e);
   }
 };
 
 export const deleteCategory = async (userId: number, id: number) => {
-  const it = await getCategoryById(userId, id);
+  const category = await findCategoryForUser(userId, id, {
+    activeOnly: true,
+    includeItems: true,
+  });
   try {
-    await it.destroy();
+    await sequelize.transaction(async (t) => {
+      await deleteItemsForCategory(category as any, t);
+      await category.destroy({ transaction: t });
+    });
   } catch (e: any) {
     throw new ApiError("Error al eliminar categoría", 500, undefined, e);
   }
