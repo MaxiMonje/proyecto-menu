@@ -85,11 +85,26 @@ export const updateCategory = async (
   id: number,
   data: UpdateCategoryDto
 ) => {
-  // Reutilizamos getCategoryById que ya valida tenant
-  const it = await getCategoryById(userId, id);
-
   try {
+    // 👇 Ahora buscamos la categoría por ID SIN filtrar por active
+    const it = await CategoryM.findOne({
+      where: { id },
+      include: [
+        {
+          model: MenuM,
+          as: "menu",
+          where: { userId }, // validamos multi-tenant
+        },
+      ],
+    });
+
+    if (!it) {
+      throw new ApiError("Category not found", 404, { userId, id });
+    }
+
+    // Aplicar patch (acepta active true o false)
     await it.update(data);
+
     return it;
   } catch (e: any) {
     throw new ApiError("Error al actualizar categoría", 500, undefined, e);

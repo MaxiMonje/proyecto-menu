@@ -139,18 +139,41 @@ export const updateItem = async (
   id: number,
   data: UpdateItemDto
 ) => {
-  // 🛡 aseguramos que el ítem sea del usuario actual
-  const item = await findItemForUser(userId, id);
-
-  // si en algún momento permitís cambiar de categoría, habría que validar la nueva:
-  if (data.categoryId) {
-    await assertCategoryBelongsToUser(data.categoryId as any, userId);
-  }
+  if (!userId) throw new ApiError("ID de usuario (tenant) inválido", 400);
+  if (!id) throw new ApiError("ID de ítem inválido", 400);
 
   try {
+    // 🛡 Buscamos el item SIN filtrar por active, pero validando tenant por la cadena Item -> Category -> Menu -> User
+    const item = await ItemM.findOne({
+      where: { id },
+      include: [
+        {
+          model: CategoryM,
+          as: "category",
+          include: [
+            {
+              model: MenuM,
+              as: "menu",
+              where: { userId },
+            },
+          ],
+        },
+      ],
+    });
+
+    if (!item) {
+      throw new ApiError("Item not found", 404, { userId, id });
+    }
+
+    // Si permitís cambiar de categoría, validamos que la nueva también sea del mismo user
+    if (data.categoryId) {
+      await assertCategoryBelongsToUser(data.categoryId as any, userId);
+    }
+
     await item.update(data);
     return item;
   } catch (e: any) {
+    if (e instanceof ApiError) throw e;
     throw new ApiError("Error al actualizar ítem", 500, undefined, e);
   }
 };
