@@ -1,21 +1,32 @@
 import { z } from "zod";
+import {
+  zRequiredString,
+  zOptionalString,
+  zBooleanLoose,
+} from "./emptyspaces"; // ajustá el path según tu estructura
 
 /* ===========================
- * Category (flat)
+ * Create Category
  * =========================== */
 export const createCategorySchema = z.object({
   menuId: z
     .coerce.number({ invalid_type_error: "menuId debe ser numérico" })
     .int("menuId debe ser entero")
     .positive("menuId debe ser mayor que 0"),
-  title: z
-    .string({ required_error: "El título de la categoría es obligatorio" })
-    .min(1, "El título de la categoría es obligatorio")
-    .max(120, "El título de la categoría no puede superar 120 caracteres"),
-  active: z.boolean().optional(),
+
+  // NO permite " " ni "", aplica trim
+  title: zRequiredString("El título de la categoría"),
+
+  // acepta true/false/"true"/"false"
+  active: zBooleanLoose,
 });
 
+/* ===========================
+ * Update Category
+ * =========================== */
 export const updateCategorySchema = z.object({
-  title: z.string().min(1).max(120).optional(),
-  active: z.boolean().optional(),
+  // si viene, NO puede ser vacío (" ") — se valida igual que en create
+  title: zRequiredString("El título de la categoría").optional(),
+
+  active: zBooleanLoose,
 });

@@ -1,46 +1,65 @@
 import { z } from "zod";
+import {
+  emptyToNull,
+  zRequiredString,
+  zOptionalString,
+  zOptionalUrl,
+  zBooleanLoose,
+} from "./emptyspaces"; // ajustá el path si hace falta
 
+// HEX #RRGGBB
 const hex = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Usá HEX #RRGGBB");
+
 const colorObj = z.object({
   primary: hex,
   secondary: hex,
 });
 
 /* ===========================
- * Preprocesamiento tolerante
+ * Preprocess común (create + update)
  * =========================== */
+
 function normalizeBody(input: unknown) {
   const body = (input ?? {}) as any;
 
-  // payload como string JSON
+  // payload como string JSON (por si viene dentro de multipart)
   if (typeof body.payload === "string") {
     try {
       const parsed = JSON.parse(body.payload);
       Object.assign(body, parsed);
-    } catch { /* ignore */ }
+    } catch {
+      // ignoramos error de parseo
+    }
     delete body.payload;
   }
 
-  // payload como objeto (algunos front lo mandan así)
+  // payload como objeto
   if (body.payload && typeof body.payload === "object") {
     Object.assign(body, body.payload);
     delete body.payload;
   }
 
-  // active como string -> boolean
+  // active string -> boolean (alineado con zBooleanLoose)
   if (typeof body.active === "string") {
     body.active = body.active === "true";
   }
 
-  // Unificar color desde planos o anidados
-  const colorPrimary = body.colorPrimary ?? body.color?.primary;
-  const colorSecondary = body.colorSecondary ?? body.color?.secondary;
-  if (colorPrimary || colorSecondary) {
+  // normalizar pos: matar espacios
+  if (typeof body.pos === "string") {
+    body.pos = emptyToNull(body.pos); // "   " -> null, " hola " -> "hola"
+  }
+
+  // Unificar color desde colorPrimary/colorSecondary o color.primary/secondary
+  const cp = body.colorPrimary ?? body.color?.primary;
+  const cs = body.colorSecondary ?? body.color?.secondary;
+
+  if (cp || cs) {
     body.color = {
-      primary: colorPrimary ?? body.color?.primary ?? "#000000",
-      secondary: colorSecondary ?? body.color?.secondary ?? "#FFFFFF",
+      primary: (cp ?? "#000000").trim(),
+      secondary: (cs ?? "#FFFFFF").trim(),
     };
   }
+
   delete body.colorPrimary;
   delete body.colorSecondary;
 
@@ -48,31 +67,43 @@ function normalizeBody(input: unknown) {
 }
 
 /* ===========================
- * Bases alineadas al modelo
+ * CREATE
  * =========================== */
-// create: title requerido; active opcional; logo/bg/color pueden ser null o ausentes
+
 const createBase = z.object({
-  title: z.string().min(1).max(120),
-  active: z.boolean().optional(),
-  // Si vienen como URL (no archivo), validar; si no vienen, OK; si vienen null, OK (modelo acepta null)
-  logo: z.union([z.string().url().max(255), z.null()]).optional(),
-  backgroundImage: z.union([z.string().url().max(255), z.null()]).optional(),
+  title: zRequiredString("El título del menú", 120),
+
+  active: zBooleanLoose,
+
+  logo: zOptionalUrl(),
+  backgroundImage: zOptionalUrl(),
+
+  // color solo puede ser objeto HEX o null
   color: z.union([colorObj, z.null()]).optional(),
-  pos: z.union([z.string().max(255), z.null()]).optional(),
+
+  // "" o espacios -> null
+  pos: zOptionalString(255),
 });
 
-// update: todos opcionales; mismo criterio de nullables
-const updateBase = z.object({
-  title: z.string().min(1).max(120).optional(),
-  active: z.boolean().optional(),
-  logo: z.union([z.string().url().max(255), z.null()]).optional(),
-  backgroundImage: z.union([z.string().url().max(255), z.null()]).optional(),
-  color: z.union([colorObj, z.null()]).optional(),
-  pos: z.union([z.string().max(255), z.null()]).optional(),
-});
+export const createMenuSchema = z.preprocess(normalizeBody, createBase);
 
 /* ===========================
- * Schemas públicos
+ * UPDATE
  * =========================== */
-export const createMenuSchema = z.preprocess(normalizeBody, createBase);
+
+const updateBase = z.object({
+  // si viene, no puede ser vacío ni solo espacios
+  title: zRequiredString("El título del menú", 120).optional(),
+
+  active: zBooleanLoose,
+
+  logo: zOptionalUrl(),
+  backgroundImage: zOptionalUrl(),
+
+  color: z.union([colorObj, z.null()]).optional(),
+
+  // "" o espacios -> null
+  pos: zOptionalString(255),
+});
+
 export const updateMenuSchema = z.preprocess(normalizeBody, updateBase);
