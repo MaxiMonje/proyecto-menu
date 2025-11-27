@@ -18,9 +18,9 @@ const ALLOWED_MIME_TYPES = [
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
 
 /**
- * Tamaño máximo de archivo: 10MB
+ * Tamaño máximo de archivo: 4MB
  */
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB en bytes
+const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB en bytes
 
 /**
  * Filtra archivos para permitir solo imágenes
