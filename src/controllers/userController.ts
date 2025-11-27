@@ -85,6 +85,20 @@ export const deleteUser = async (
   }
 };
 
+export const activateUser = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const id = parseId(req);
+    const result = await userService.activateUser(id);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const forgotPassword = async (
   req: Request,
   res: Response,

@@ -1,4 +1,5 @@
 import { User, UserCreationAttributes } from "../models/User";
+import { Menu } from "../models/Menu";
 import { PasswordResetToken } from "../models/PasswordResetToken";
 import { CreateUserDto, UpdateUserDto } from "../dtos/user.dto";
 import { ApiError } from "../utils/ApiError";
@@ -234,10 +235,51 @@ export const updateUser = async (id: number, data: UpdateUserDto) => {
 ================================ */
 
 export const deleteUser = async (id: number) => {
-  const user = await User.findOne({ where: { id, active: true } });
-  if (!user) throw new ApiError("User not found", 404);
-  await user.update({ active: false });
-  return { message: "User disabled successfully" };
+  return await sequelize.transaction(async (t) => {
+    const user = await User.findOne({
+      where: { id, active: true },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+    if (!user) throw new ApiError("User not found", 404);
+
+    await user.update({ active: false }, { transaction: t });
+
+    await Menu.update(
+      { active: false },
+      {
+        where: { userId: user.id, active: true },
+        transaction: t,
+      }
+    );
+
+    return { message: "User disabled successfully" };
+  });
+};
+
+export const activateUser = async (id: number) => {
+  return await sequelize.transaction(async (t) => {
+    const user = await User.findOne({
+      where: { id },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+    if (!user) throw new ApiError("User not found", 404);
+
+    if (!user.active) {
+      await user.update({ active: true }, { transaction: t });
+    }
+
+    await Menu.update(
+      { active: true },
+      {
+        where: { userId: user.id },
+        transaction: t,
+      }
+    );
+
+    return { message: "User enabled successfully" };
+  });
 };
 
 /* ================================
