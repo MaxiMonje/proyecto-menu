@@ -63,6 +63,21 @@ function normalizeBody(input: unknown) {
   delete body.colorPrimary;
   delete body.colorSecondary;
 
+  const shouldDropFileField = (value: unknown) => {
+    if (value === null || typeof value === "undefined") return true;
+    if (typeof value !== "string") return false;
+    const trimmed = value.trim();
+    return trimmed === "" || trimmed.toLowerCase() === "null" || trimmed.toLowerCase() === "undefined";
+  };
+
+  if (shouldDropFileField(body.logo)) {
+    delete body.logo;
+  }
+
+  if (shouldDropFileField(body.backgroundImage)) {
+    delete body.backgroundImage;
+  }
+
   return body;
 }
 
