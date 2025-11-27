@@ -46,7 +46,6 @@ PasswordResetToken.init({
   token: {
     type: DataTypes.STRING(255),
     allowNull: false,
-    unique: true,
   },
   expires_at: {
     type: DataTypes.DATE,
@@ -73,6 +72,17 @@ PasswordResetToken.init({
   timestamps: true,
   createdAt: 'created_at',
   updatedAt: 'updated_at',
+  indexes: [
+    {
+      name: 'uix_password_reset_tokens_token',
+      unique: true,
+      fields: ['token'],
+    },
+    {
+      name: 'idx_password_reset_tokens_user_id',
+      fields: ['user_id'],
+    },
+  ],
 });
 
 // Asociaciones
