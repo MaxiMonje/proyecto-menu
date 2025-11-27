@@ -9,6 +9,8 @@ import { Category } from "../models/Category";
 import { Item } from "../models/Item";
 import ItemImage from "../models/ItemImage";
 
+const DEFAULT_MENU_LOGO_URL = (process.env.DEFAULT_MENU_LOGO_URL ?? "").trim() || null;
+
 /* ===========================
  * Helpers comunes
  * =========================== */
@@ -166,10 +168,12 @@ export const createMenu = async (
         `menus/${menu.id}`
       );
 
-      if (logoUrl || bgUrl) {
+      const fallbackLogo = logoUrl ?? DEFAULT_MENU_LOGO_URL;
+
+      if (fallbackLogo || bgUrl) {
         await menu.update(
           {
-            ...(logoUrl ? { logo: logoUrl } : {}),
+            ...(fallbackLogo ? { logo: fallbackLogo } : {}),
             ...(bgUrl ? { backgroundImage: bgUrl } : {}),
           },
           { transaction: t }
