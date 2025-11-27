@@ -1,7 +1,11 @@
-import { Transaction } from "sequelize";
+import { Op, Transaction } from "sequelize";
 import sequelize from "../utils/databaseService";
 
-import { Item as ItemM, ItemCreationAttributes } from "../models/Item";
+import {
+  Item as ItemM,
+  ItemAttributes,
+  ItemCreationAttributes,
+} from "../models/Item";
 import { Category as CategoryM } from "../models/Category";
 import { Menu as MenuM } from "../models/Menu";
 import ItemImage from "../models/ItemImage";
@@ -41,6 +45,104 @@ async function assertCategoryBelongsToUser(categoryId: number, userId: number) {
   if (!category) {
     throw new ApiError("No tenés permiso para usar esta categoría", 403);
   }
+}
+
+const POSITION_GAP = 10000;
+
+const sanitizePosition = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+};
+
+async function nextPositionForCategory(categoryId: number, t?: Transaction) {
+  const maxPosition = await ItemM.max("position", {
+    where: { categoryId },
+    transaction: t,
+  });
+  if (!Number.isFinite(maxPosition as number)) return POSITION_GAP;
+  return (maxPosition as number) + POSITION_GAP;
+}
+
+async function findCategoryNeighbors(
+  categoryId: number,
+  target: number,
+  excludeId?: number,
+  t?: Transaction
+) {
+  const whereBase: any = { categoryId };
+  if (excludeId) whereBase.id = { [Op.ne]: excludeId };
+
+  const lock = t ? Transaction.LOCK.UPDATE : undefined;
+
+  const [previous, next] = await Promise.all([
+    ItemM.findOne({
+      where: { ...whereBase, position: { [Op.lt]: target } },
+      order: [["position", "DESC"]],
+      transaction: t,
+      lock,
+    }),
+    ItemM.findOne({
+      where: { ...whereBase, position: { [Op.gt]: target } },
+      order: [["position", "ASC"]],
+      transaction: t,
+      lock,
+    }),
+  ]);
+
+  return { previous, next };
+}
+
+function computePositionBetween(
+  previous?: ItemM | null,
+  next?: ItemM | null
+) {
+  const prevPosition = previous?.position ?? 0;
+  const nextPosition = next?.position ?? prevPosition + POSITION_GAP * 2;
+  const gap = nextPosition - prevPosition;
+  if (gap <= 1) return null;
+  return prevPosition + Math.floor(gap / 2);
+}
+
+async function rebalanceCategoryPositions(categoryId: number, t?: Transaction) {
+  const lock = t ? Transaction.LOCK.UPDATE : undefined;
+  const items = await ItemM.findAll({
+    where: { categoryId },
+    order: [["position", "ASC"]],
+    transaction: t,
+    lock,
+  });
+
+  let nextPosition = POSITION_GAP;
+  for (const item of items) {
+    if (item.position !== nextPosition) {
+      await item.update({ position: nextPosition }, { transaction: t });
+    }
+    nextPosition += POSITION_GAP;
+  }
+}
+
+async function resolveItemPositionWithGaps(
+  categoryId: number,
+  requested: number,
+  itemId?: number,
+  t?: Transaction
+) {
+  const target = sanitizePosition(requested);
+  const { previous, next } = await findCategoryNeighbors(
+    categoryId,
+    target,
+    itemId,
+    t
+  );
+  let finalPosition = computePositionBetween(previous, next);
+
+  if (finalPosition === null) {
+    await rebalanceCategoryPositions(categoryId, t);
+    const retry = await findCategoryNeighbors(categoryId, target, itemId, t);
+    finalPosition = computePositionBetween(retry.previous, retry.next);
+  }
+
+  return finalPosition ?? POSITION_GAP;
 }
 
 /**
@@ -137,7 +239,7 @@ export const getAllItems = async (userId: number) => {
           order: [["sortOrder", "ASC"]],
         },
       ],
-      order: [["id", "ASC"]],
+      order: [["position", "ASC"]],
     });
 
     return items.map(formatItemResponse);
@@ -161,7 +263,11 @@ export const createItem = async (userId: number, data: CreateItemDto) => {
 
   try {
     return await withTx(async (t) => {
-      const created = await ItemM.create(data as ItemCreationAttributes, { transaction: t });
+      const position = await nextPositionForCategory(data.categoryId, t);
+      const created = await ItemM.create(
+        { ...(data as ItemCreationAttributes), position },
+        { transaction: t }
+      );
       return formatItemResponse(created);
     });
   } catch (e: any) {
@@ -200,12 +306,50 @@ export const updateItem = async (
       throw new ApiError("Item not found", 404, { userId, id });
     }
 
-    // Si permitís cambiar de categoría, validamos que la nueva también sea del mismo user
-    if (data.categoryId) {
-      await assertCategoryBelongsToUser(data.categoryId as any, userId);
+    if (
+      typeof data.categoryId === "number" &&
+      data.categoryId !== item.categoryId
+    ) {
+      throw new ApiError(
+        "No se puede mover el ítem a otra categoría",
+        400,
+        { currentCategoryId: item.categoryId, requestedCategoryId: data.categoryId }
+      );
     }
 
-    await item.update(data);
+    await withTx(async (t) => {
+      const patch: Partial<ItemAttributes> = {};
+
+      if (typeof data.title === "string") {
+        patch.title = data.title;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(data, "description")) {
+        patch.description = (data.description ?? null) as any;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(data, "price")) {
+        patch.price = (data.price ?? null) as any;
+      }
+
+      if (typeof data.active === "boolean") {
+        patch.active = data.active;
+      }
+
+      if (typeof data.newPosition === "number") {
+        patch.position = await resolveItemPositionWithGaps(
+          item.categoryId,
+          data.newPosition,
+          item.id,
+          t
+        );
+      }
+
+      if (Object.keys(patch).length === 0) return;
+      await item.update(patch, { transaction: t });
+    });
+
+    await item.reload();
     return formatItemResponse(item);
   } catch (e: any) {
     if (e instanceof ApiError) throw e;

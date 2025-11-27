@@ -8,10 +8,11 @@ export interface CreateItemDto {
 }
 
 export interface UpdateItemDto {
-  categoryId: any;
+  categoryId?: number;
   title?: string;
   description?: string | null;
   price?: number | null;
   active?: boolean;
+  newPosition?: number;
   // ❌ Sin imágenes → se suben con /images/items/:itemId
 }

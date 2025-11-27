@@ -106,14 +106,22 @@ export const getMenuById = async (
                   ],
                 },
               ],
-              order: [["id", "ASC"]],
+              order: [["position", "ASC"]],
             },
           ],
-          order: [["id", "ASC"]],
+          order: [["position", "ASC"]],
         },
       ],
       transaction: t,
-      order: [[{ model: Category, as: "categories" }, "id", "ASC"]],
+      order: [
+        [{ model: Category, as: "categories" }, "position", "ASC"],
+        [
+          { model: Category, as: "categories" },
+          { model: Item, as: "items" },
+          "position",
+          "ASC",
+        ],
+      ],
     });
 
     if (!menu) {

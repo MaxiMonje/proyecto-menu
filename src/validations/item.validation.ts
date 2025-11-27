@@ -9,11 +9,13 @@ const priceSchema = z
   .coerce.number({ invalid_type_error: "price debe ser numérico" })
   .nonnegative("price no puede ser negativo");
 
+const categoryIdSchema = z
+  .coerce.number({ invalid_type_error: "categoryId debe ser numérico" })
+  .int("categoryId debe ser entero")
+  .positive("categoryId debe ser mayor que 0");
+
 export const createItemSchema = z.object({
-  categoryId: z
-    .coerce.number({ invalid_type_error: "categoryId debe ser numérico" })
-    .int("categoryId debe ser entero")
-    .positive("categoryId debe ser mayor que 0"),
+  categoryId: categoryIdSchema,
 
   // NO permite "   " ni "" – aplica trim
   title: zRequiredString("El título del ítem", 160),
@@ -31,6 +33,7 @@ export const createItemSchema = z.object({
 });
 
 export const updateItemSchema = z.object({
+  categoryId: categoryIdSchema.optional(),
   // opcional, pero si viene NO puede ser vacío
   title: zRequiredString("El título del ítem", 160).optional(),
 
@@ -40,6 +43,12 @@ export const updateItemSchema = z.object({
   price: priceSchema.nullable().optional(),
 
   active: zBooleanLoose,
+
+  newPosition: z
+    .coerce.number({ invalid_type_error: "newPosition debe ser numérico" })
+    .int("newPosition debe ser entero")
+    .min(0, "newPosition debe ser mayor o igual a 0")
+    .optional(),
 
   // 👉 Tampoco images acá
 });

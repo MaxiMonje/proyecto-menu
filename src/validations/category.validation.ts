@@ -29,4 +29,9 @@ export const updateCategorySchema = z.object({
   title: zRequiredString("El título de la categoría").optional(),
 
   active: zBooleanLoose,
+  newPosition: z
+    .coerce.number({ invalid_type_error: "newPosition debe ser numérico" })
+    .int("newPosition debe ser entero")
+    .min(0, "newPosition debe ser mayor o igual a 0")
+    .optional(),
 });
