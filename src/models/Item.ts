@@ -37,7 +37,7 @@ Item.init(
 id: { type: DT4.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
 categoryId: { field: "categoryId", type: DT4.INTEGER.UNSIGNED, allowNull: false },
 title: { type: DT4.STRING(160), allowNull: false },
-description: { type: DT4.TEXT, allowNull: true },
+description: { type: DT4.STRING(500), allowNull: true },
 price: { type: DT4.DECIMAL(10, 2), allowNull: true },
 active: { type: DT4.BOOLEAN, allowNull: false, defaultValue: true },
 position: { type: DT4.INTEGER.UNSIGNED, allowNull: false, defaultValue: 10000 },
