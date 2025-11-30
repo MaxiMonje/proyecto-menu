@@ -74,6 +74,26 @@ export const getAllMenus = async (userId: number) => {
   }
 };
 
+export const getMenuBasicInfo = async (userId: number, id: number) => {
+  if (!userId) throw new ApiError("ID de usuario (tenant) inválido", 400);
+  if (!id) throw new ApiError("ID de menú inválido", 400);
+
+  try {
+    const menu = await MenuM.findOne({
+      where: { id, userId },
+    });
+
+    if (!menu) {
+      throw new ApiError("Menu not found", 404, { userId, id });
+    }
+
+    return menu;
+  } catch (err: any) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError("Error al obtener el menú", 500, { userId, id }, err);
+  }
+};
+
 /** Obtener un menú con toda su jerarquía */
 export const getMenuById = async (
   userId: number,

@@ -34,6 +34,15 @@
 	DB_USER=root
 	DB_PASSWORD=12345678
    ```
+   Agregá también la URL pública desde donde los clientes ven los menús (se usa para construir el enlace que va dentro del QR):
+   ```
+	PUBLIC_MENU_BASE_URL=http://localhost:5173/menu
+   ```
+   Opcionalmente podés sobreescribir el servicio de QR si tenés otro endpoint:
+   ```
+	QR_API_ENDPOINT=https://api-qr-yz35.onrender.com/api/qr
+	QR_API_TIMEOUT_MS=10000
+   ```
 
 ## ▶️ Cómo correr el proyecto
 
@@ -76,9 +85,30 @@ El servidor corre en: [http://localhost:3000](http://localhost:3000)
 |--------|------|-------------|
 | GET | `/api/menus` | Listar menús del tenant |
 | GET | `/api/menus/:id` | Obtener menú por ID |
+| GET | `/api/menus/:id/qr` | Generar un PNG con el QR que apunta al menú |
+| POST | `/api/menus/:id/import-csv` | Importar categorías e ítems desde un CSV |
 | POST | `/api/menus` | Crear nuevo menú |
 | PUT | `/api/menus/:id` | Actualizar menú |
 | DELETE | `/api/menus/:id` | Baja lógica (active=false) |
+
+> El endpoint `/api/menus/:id/qr` acepta los parámetros opcionales `format` (`png`, `svg` o `webp`) y `size` (entre 128 y 1024). Devuelve por defecto la imagen en binario para que la puedas descargar o mostrar directamente en el navegador.
+
+### Importar categorías + ítems
+
+- Endpoint: `POST /api/menus/:id/import-csv`
+- Headers: `x-tenant-subdomain: <tenant>`
+- Body: `multipart/form-data` con el archivo en `file`
+- Formato del CSV (encabezados obligatorios):
+  ```
+  type,categoryTitle,categoryActive,categoryPosition,itemTitle,itemDescription,itemPrice,itemActive,itemPosition
+  category,"Pizzas",true,,,
+  item,,,, "Muzzarella","Con salsa y muzza",2500,true,
+  item,,,, "Napolitana","Con tomate fresco",2700,true,
+  category,"Bebidas",true,,,
+  item,,,, "Coca 500ml","",1500,true,
+  ```
+- Cada fila `category` crea una nueva categoría si el título aún no existe en el menú (si ya existe, se reutiliza). Todas las filas `item` siguientes se asignan a la última categoría definida.
+- Si alguna fila viene incompleta, el endpoint continúa con las demás y devuelve el detalle de errores por fila en la respuesta.
 
 ---
 
