@@ -234,7 +234,7 @@ export const updateMenu = async (
       const patch: any = {};
       if (typeof data.title === "string") patch.title = data.title;
       if (typeof data.active === "boolean") patch.active = data.active;
-      if (typeof data.pos === "string") patch.pos = data.pos;
+      if (typeof data.pos === "string" || data.pos === null) patch.pos = data.pos;
       if (typeof data.color !== "undefined") patch.color = data.color;
 
       // Subir imágenes nuevas (si las mandan)

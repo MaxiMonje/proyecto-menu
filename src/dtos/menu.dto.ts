@@ -11,7 +11,7 @@ export interface CreateMenuDto {
     logo?: string;
     backgroundImage?: string;
     color?: MenuColorDto;
-    pos?: string;
+    pos?: string | null;
  }
 
 
@@ -21,5 +21,5 @@ export interface UpdateMenuDto {
     logo?: string;
     backgroundImage?: string;
     color?: MenuColorDto;
-    pos?: string;
+    pos?: string | null;
 }
