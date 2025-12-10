@@ -28,10 +28,6 @@ export const createUserSchema = z.object({
   cel: zOptionalString(50),
 
   roleId: z.coerce.number({ invalid_type_error: "roleId debe ser numérico" }),
-
-  // password requerida, trim
-  password: z.string().trim().min(8).max(16),
-
   // subdomain opcional
   subdomain,
 });

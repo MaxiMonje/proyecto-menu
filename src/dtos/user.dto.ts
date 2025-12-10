@@ -2,10 +2,9 @@ export interface CreateUserDto {
   name: string;
   lastName: string;
   email: string;
-  cel: string;
+  cel?: string | null;
   roleId: number;
-  password: string;        // <- requerido
-  subdomain: string;
+  subdomain?: string | null;
 }
 
 export interface UpdateUserDto {

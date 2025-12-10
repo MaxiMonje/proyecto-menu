@@ -1,102 +1,115 @@
 // src/models/PasswordResetToken.ts
-import { DataTypes, Model, Optional } from 'sequelize';
+import { DataTypes, Model, Optional } from "sequelize";
 import sequelize from "../utils/databaseService";
-import { User } from './User';
+import { User } from "./User";
 
-interface PasswordResetTokenAttributes {
+export interface PasswordResetTokenAttributes {
   id: number;
-  user_id: number;
+  userId: number;
   token: string;
-  expires_at: Date;
-  is_used: boolean;
-  created_at?: Date;
-  updated_at?: Date;
+  expiresAt: Date;
+  isUsed: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
-interface PasswordResetTokenCreationAttributes 
-  extends Optional<PasswordResetTokenAttributes, 'id' | 'created_at' | 'updated_at'> {}
+type PasswordResetTokenCreationAttributes = Optional<
+  PasswordResetTokenAttributes,
+  "id" | "createdAt" | "updatedAt"
+>;
 
-class PasswordResetToken extends Model<PasswordResetTokenAttributes, PasswordResetTokenCreationAttributes> 
-  implements PasswordResetTokenAttributes {
-  
+class PasswordResetToken
+  extends Model<PasswordResetTokenAttributes, PasswordResetTokenCreationAttributes>
+  implements PasswordResetTokenAttributes
+{
   public id!: number;
-  public user_id!: number;
+  public userId!: number;
   public token!: string;
-  public expires_at!: Date;
-  public is_used!: boolean;
-  public readonly created_at!: Date;
-  public readonly updated_at!: Date;
+  public expiresAt!: Date;
+  public isUsed!: boolean;
+  public readonly createdAt!: Date;
+  public readonly updatedAt!: Date;
+
+  public readonly user?: User;
 }
 
-PasswordResetToken.init({
-  id: {
-    type: DataTypes.INTEGER.UNSIGNED,
-    autoIncrement: true,
-    primaryKey: true,
-  },
-  user_id: {
-    type: DataTypes.INTEGER.UNSIGNED,
-    allowNull: false,
-    references: {
-      model: User,
-      key: 'id',
+PasswordResetToken.init(
+  {
+    id: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      autoIncrement: true,
+      primaryKey: true,
     },
-    onDelete: 'CASCADE',
-  },
-  token: {
-    type: DataTypes.STRING(255),
-    allowNull: false,
-  },
-  expires_at: {
-    type: DataTypes.DATE,
-    allowNull: false,
-  },
-  is_used: {
-    type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false,
-  },
-  created_at: {
-    type: DataTypes.DATE,
-    allowNull: false,
-    defaultValue: DataTypes.NOW,
-  },
-  updated_at: {
-    type: DataTypes.DATE,
-    allowNull: false,
-    defaultValue: DataTypes.NOW,
-  },
-}, {
-  sequelize,
-  tableName: 'password_reset_tokens',
-  timestamps: true,
-  createdAt: 'created_at',
-  updatedAt: 'updated_at',
-  indexes: [
-    {
-      name: 'uix_password_reset_tokens_token',
-      unique: true,
-      fields: ['token'],
+    userId: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      field: "user_id",
+      references: {
+        model: User,
+        key: "id",
+      },
+      onDelete: "CASCADE",
     },
-    {
-      name: 'idx_password_reset_tokens_user_id',
-      fields: ['user_id'],
+    token: {
+      type: DataTypes.STRING(255),
+      allowNull: false,
     },
-  ],
+    expiresAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      field: "expires_at",
+    },
+    isUsed: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: "is_used",
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+      field: "created_at",
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+      field: "updated_at",
+    },
+  },
+  {
+    sequelize,
+    tableName: "password_reset_tokens",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    indexes: [
+      {
+        name: "uix_password_reset_tokens_token",
+        unique: true,
+        fields: ["token"],
+      },
+      {
+        name: "idx_password_reset_tokens_user_id",
+        fields: ["user_id"],
+      },
+    ],
+  }
+);
+
+PasswordResetToken.belongsTo(User, {
+  foreignKey: "userId",
+  as: "user",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });
 
-// Asociaciones
-PasswordResetToken.belongsTo(User, {
-  foreignKey: 'user_id',
-  as: 'user',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE',
-});
 User.hasMany(PasswordResetToken, {
-  foreignKey: 'user_id',
-  as: 'resetTokens',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE',
+  foreignKey: "userId",
+  as: "resetTokens",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });
 
 export { PasswordResetToken };

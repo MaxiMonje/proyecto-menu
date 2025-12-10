@@ -13,8 +13,26 @@ import {
 } from "../utils/pagination";
 import { sendMail } from "../utils/mailerClient";
 import sequelize from "../utils/databaseService";
+import { passwordReset } from "./passwordResetService";
+import { emailService } from "./emailService";
 
-const RESET_TTL_MIN = parseInt(process.env.PASSWORD_RESET_TTL_MINUTES ?? "10", 10);
+const RESET_TTL_MIN = parseInt(process.env.PASSWORD_RESET_TTL_MINUTES ?? "1440", 10);
+const FRONTEND_INVITE_URL = (process.env.FRONTEND_INVITE_URL ?? "https://frontend.local/create").trim();
+const FRONTEND_RECOVER_URL = (process.env.FRONTEND_RECOVER_URL ?? "https://frontend.local/recover").trim();
+
+const buildLinkWithToken = (baseUrl: string, token: string) => {
+  const sanitized = baseUrl.replace(/\/+$/, "");
+  const separator = sanitized.includes("?") ? "&" : "?";
+  return `${sanitized}${separator}token=${encodeURIComponent(token)}`;
+};
+
+const buildInviteLink = (token: string) => buildLinkWithToken(FRONTEND_INVITE_URL, token);
+const buildRecoverLink = (token: string) => buildLinkWithToken(FRONTEND_RECOVER_URL, token);
+
+const buildCustomResetLink = (baseUrl: string, token: string) => {
+  const sanitized = baseUrl.trim().replace(/\/+$/, "");
+  return `${sanitized}/${encodeURIComponent(token)}`;
+};
 
 /* ================================
    HELPERS
@@ -79,12 +97,8 @@ export const createUser = async (data: CreateUserDto) => {
       if (subTaken) throw new ApiError("Subdomain already in use", 409);
     }
 
-    // Password hash
-    const pwd = data.password.trim();
-    if (pwd.length < 8 || pwd.length > 16) {
-      throw new ApiError("Password must be between 8 and 16 characters.", 400);
-    }
-    const passwordHash = await argon2.hash(pwd);
+    const tempPassword = crypto.randomBytes(8).toString("hex"); // 16 chars
+    const passwordHash = await argon2.hash(tempPassword);
 
     // Crear usuario
     const created = await User.create({
@@ -93,11 +107,15 @@ export const createUser = async (data: CreateUserDto) => {
       email: data.email,
       cel: data.cel ?? null,
       roleId: data.roleId,
-      password: pwd,
+      password: tempPassword,
       passwordHash,
       active: true,
       subdomain: sub,
     } as UserCreationAttributes);
+
+    const token = await passwordReset.createInviteTokenForUser(created);
+    const link = buildInviteLink(token);
+    await emailService.sendPasswordInviteEmail(created.email, created.name, link);
 
     return created;
   } catch (err: any) {
@@ -222,8 +240,8 @@ export const updateUser = async (id: number, data: UpdateUserDto) => {
     if (!ok) throw new ApiError("Password update failed", 500);
 
     await PasswordResetToken.update(
-      { is_used: true },
-      { where: { user_id: user.id, is_used: false } }
+      { isUsed: true },
+      { where: { userId: user.id, isUsed: false } }
     );
   }
 
@@ -299,43 +317,25 @@ export const requestPasswordReset = async (email: string, resetUrl?: string) => 
   const user = await User.findOne({ where: { email, active: true } });
   if (!user) throw new ApiError("No se encontró una cuenta con este email.", 404);
 
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-  const expiresAt = new Date(Date.now() + RESET_TTL_MIN * 60 * 1000);
-
-  await sequelize.transaction(async (t) => {
-    await PasswordResetToken.update(
-      { is_used: true },
-      { where: { user_id: user.id, is_used: false }, transaction: t }
-    );
-
-    await PasswordResetToken.create(
-      { user_id: user.id, token: tokenHash, expires_at: expiresAt, is_used: false },
-      { transaction: t }
-    );
-  });
-
-  const completeResetUrl = resetUrl ? `${resetUrl}/${rawToken}` : rawToken;
+  const rawToken = await passwordReset.createInviteTokenForUser(user);
+  const completeResetUrl = resetUrl
+    ? buildCustomResetLink(resetUrl, rawToken)
+    : buildRecoverLink(rawToken);
 
   const subject = "Recuperá tu contraseña";
-  const text = resetUrl
-    ? `Hola ${user.name}, para resetear tu contraseña abrí este enlace: ${completeResetUrl}`
-    : `Hola ${user.name}, tu código de recuperación es: ${rawToken}`;
-  const html = resetUrl
-    ? `<p>Hola ${user.name},</p><p>Para resetear tu contraseña hacé clic:</p><p><a href="${completeResetUrl}" target="_blank" rel="noopener">Resetear contraseña</a></p>`
-    : `<p>Hola ${user.name},</p><p>Tu código de recuperación es: <strong>${rawToken}</strong></p>`;
+  const text = `Hola ${user.name}, para resetear tu contraseña abrí este enlace: ${completeResetUrl}`;
+  const html = `<p>Hola ${user.name},</p><p>Para resetear tu contraseña hacé clic:</p><p><a href="${completeResetUrl}" target="_blank" rel="noopener">Resetear contraseña</a></p>`;
 
   await sendMail({ to: email, subject, text, html });
-  return { message: `Enviamos un enlace de recuperación. Caduca en ${RESET_TTL_MIN} minutos.` };
+  const ttlHours = Math.round(RESET_TTL_MIN / 60);
+  return {
+    message: `Enviamos un enlace de recuperación. Caduca en ${ttlHours || 1} hora${ttlHours === 1 ? "" : "s"}.`,
+  };
 };
 
 export const verifyResetToken = async (token: string): Promise<boolean> => {
   try {
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const resetToken = await PasswordResetToken.findOne({
-      where: { token: tokenHash, is_used: false, expires_at: { [Op.gt]: new Date() } },
-    });
-    return !!resetToken;
+    return await passwordReset.isTokenValid(token);
   } catch (e) {
     console.error("Error verificando token:", e);
     return false;
@@ -343,42 +343,17 @@ export const verifyResetToken = async (token: string): Promise<boolean> => {
 };
 
 export const resetPasswordWithToken = async (token: string, newPassword: string) => {
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const pwd = newPassword.trim();
+  if (pwd.length < 8 || pwd.length > 16) {
+    throw new ApiError("La contraseña debe tener entre 8 y 16 caracteres.", 422);
+  }
 
-  return await sequelize.transaction(async (t) => {
-    const resetToken = await PasswordResetToken.findOne({
-      where: { token: tokenHash, is_used: false, expires_at: { [Op.gt]: new Date() } },
-      include: [{ model: User, as: "user" }],
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
+  const matchedUser = await passwordReset.verifyAndConsumeToken(token);
+  const user = await User.scope("withHash").findByPk(matchedUser.id);
+  if (!user || !user.active) throw new ApiError("Usuario no encontrado", 404);
 
-    if (!resetToken) throw new ApiError("Token inválido o expirado", 404);
+  user.passwordHash = await argon2.hash(pwd);
+  await user.save({ hooks: false });
 
-    const pwd = newPassword.trim();
-    if (pwd.length < 8 || pwd.length > 16) {
-      throw new ApiError("La contraseña debe tener entre 8 y 16 caracteres.", 422);
-    }
-
-    const user = await User.unscoped().findOne({
-      where: { id: resetToken.user_id, active: true },
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-    if (!user) throw new ApiError("Usuario no encontrado", 404);
-
-    user.set("password", pwd);
-    await user.save({ transaction: t });
-
-    await PasswordResetToken.update(
-      { is_used: true },
-      { where: { user_id: user.id, is_used: false }, transaction: t }
-    );
-
-    const fresh = await User.scope("withHash").findByPk(user.id, { transaction: t });
-    const ok = await fresh!.validatePassword(pwd);
-    if (!ok) throw new ApiError("Error actualizando contraseña", 500);
-
-    return { message: "Contraseña cambiada exitosamente" };
-  });
+  return { message: "Contraseña cambiada exitosamente" };
 };
