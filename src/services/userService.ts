@@ -11,7 +11,6 @@ import {
   PaginatedResult,
   buildPaginatedResult,
 } from "../utils/pagination";
-import { sendMail } from "../utils/mailerClient";
 import sequelize from "../utils/databaseService";
 import { passwordReset } from "./passwordResetService";
 import { emailService } from "./emailService";
@@ -322,11 +321,7 @@ export const requestPasswordReset = async (email: string, resetUrl?: string) => 
     ? buildCustomResetLink(resetUrl, rawToken)
     : buildRecoverLink(rawToken);
 
-  const subject = "Recuperá tu contraseña";
-  const text = `Hola ${user.name}, para resetear tu contraseña abrí este enlace: ${completeResetUrl}`;
-  const html = `<p>Hola ${user.name},</p><p>Para resetear tu contraseña hacé clic:</p><p><a href="${completeResetUrl}" target="_blank" rel="noopener">Resetear contraseña</a></p>`;
-
-  await sendMail({ to: email, subject, text, html });
+  await emailService.sendPasswordRecoveryEmail(user.email, user.name, completeResetUrl);
   const ttlHours = Math.round(RESET_TTL_MIN / 60);
   return {
     message: `Enviamos un enlace de recuperación. Caduca en ${ttlHours || 1} hora${ttlHours === 1 ? "" : "s"}.`,
