@@ -51,7 +51,8 @@ export const createUser = async (
 ) => {
   try {
     const user = await userService.createUser(req.body); // password requerido en DTO
-    res.status(201).json(user);
+    const payload = user.toJSON();
+    res.status(201).json({ ...payload, subdomain: user.subdomain });
   } catch (error) {
     next(error);
   }

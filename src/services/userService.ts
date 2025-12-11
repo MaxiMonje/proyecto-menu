@@ -14,6 +14,7 @@ import {
 import sequelize from "../utils/databaseService";
 import { passwordReset } from "./passwordResetService";
 import { emailService } from "./emailService";
+import { generateUserSubdomain } from "../utils/subdomain";
 
 const RESET_TTL_MIN = parseInt(process.env.PASSWORD_RESET_TTL_MINUTES ?? "1440", 10);
 const FRONTEND_INVITE_URL = (process.env.FRONTEND_INVITE_URL ?? "https://frontend.local/create").trim();
@@ -32,19 +33,6 @@ const buildCustomResetLink = (baseUrl: string, token: string) => {
   const sanitized = baseUrl.trim().replace(/\/+$/, "");
   return `${sanitized}/${encodeURIComponent(token)}`;
 };
-
-/* ================================
-   HELPERS
-================================ */
-
-const normalizeSubdomain = (s: string) =>
-  s
-    .trim()
-    .toLowerCase()
-    .replace(/[\u0300-\u036f]/g, "") // quitar acentos
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/--+/g, "-")
-    .replace(/^-+|-+$/g, "");
 
 /* ================================
    QUERIES BÁSICAS
@@ -82,19 +70,7 @@ export const createUser = async (data: CreateUserDto) => {
     const emailTaken = await User.findOne({ where: { email: data.email } });
     if (emailTaken) throw new ApiError("Email already in use", 409);
 
-    /* === SUBDOMAIN OPCIONAL === */
-    let sub: string | null = null;
-
-    if (data.subdomain) {
-      sub = normalizeSubdomain(data.subdomain);
-
-      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(sub) || sub.length < 3 || sub.length > 63) {
-        throw new ApiError("Invalid subdomain format", 400);
-      }
-
-      const subTaken = await User.findOne({ where: { subdomain: sub } });
-      if (subTaken) throw new ApiError("Subdomain already in use", 409);
-    }
+    const subdomain = await generateUserSubdomain(data.name, data.lastName);
 
     const tempPassword = crypto.randomBytes(8).toString("hex"); // 16 chars
     const passwordHash = await argon2.hash(tempPassword);
@@ -109,7 +85,7 @@ export const createUser = async (data: CreateUserDto) => {
       password: tempPassword,
       passwordHash,
       active: true,
-      subdomain: sub,
+      subdomain,
     } as UserCreationAttributes);
 
     const token = await passwordReset.createInviteTokenForUser(created);
@@ -138,24 +114,12 @@ export const createGoogleUser = async (userData: {
   email: string;
   cel?: string | null;
   roleId: number;
-  subdomain?: string | null;
 }) => {
   try {
     const tempPassword = "google" + Math.random().toString(36).substring(2, 8);
     const passwordHash = await argon2.hash(tempPassword);
 
-    let sub: string | null = null;
-
-    if (userData.subdomain) {
-      sub = normalizeSubdomain(userData.subdomain);
-
-      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(sub) || sub.length < 3 || sub.length > 63) {
-        throw new ApiError("Invalid subdomain format", 400);
-      }
-
-      const subTaken = await User.findOne({ where: { subdomain: sub } });
-      if (subTaken) throw new ApiError("Subdomain already in use", 409);
-    }
+    const subdomain = await generateUserSubdomain(userData.name, userData.lastName);
 
     const user = await User.create({
       name: userData.name,
@@ -166,7 +130,7 @@ export const createGoogleUser = async (userData: {
       password: tempPassword,
       passwordHash,
       active: true,
-      subdomain: sub,
+      subdomain,
     } as UserCreationAttributes);
 
     return user;

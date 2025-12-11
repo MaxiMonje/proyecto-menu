@@ -4,7 +4,6 @@ export interface CreateUserDto {
   email: string;
   cel?: string | null;
   roleId: number;
-  subdomain?: string | null;
 }
 
 export interface UpdateUserDto {

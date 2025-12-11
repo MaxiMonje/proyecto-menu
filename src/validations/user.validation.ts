@@ -1,23 +1,5 @@
 import { z } from "zod";
-import { emptyToNull, zOptionalString } from "./emptyspaces"; // ajustá el path si hace falta
-
-// Subdominio OPCIONAL:
-// - trim
-// - "" o "   " -> null
-// - si viene valor, valida largo + regex
-const subdomain = z.preprocess(
-  emptyToNull,
-  z
-    .string()
-    .min(3, "El subdominio debe tener al menos 3 caracteres")
-    .max(63, "El subdominio no puede superar 63 caracteres")
-    .regex(
-      /^[a-z0-9]+(-[a-z0-9]+)*$/,
-      "Usá minúsculas, números y guiones (sin espacios)"
-    )
-    .nullable()
-    .optional()
-);
+import { zOptionalString } from "./emptyspaces"; // ajustá el path si hace falta
 
 export const createUserSchema = z.object({
   name: z.string().trim().min(1, "El nombre es obligatorio"),
@@ -28,8 +10,6 @@ export const createUserSchema = z.object({
   cel: zOptionalString(50),
 
   roleId: z.coerce.number({ invalid_type_error: "roleId debe ser numérico" }),
-  // subdomain opcional
-  subdomain,
 });
 
 export const updateUserSchema = z
@@ -44,9 +24,6 @@ export const updateUserSchema = z
     roleId: z.coerce.number({ invalid_type_error: "roleId debe ser numérico" }).optional(),
 
     password: z.string().trim().min(8).max(16).optional(),
-
-    // también permitimos actualizar subdomain opcionalmente
-    subdomain,
   })
   .strict();
 
