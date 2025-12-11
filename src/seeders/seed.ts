@@ -8,9 +8,21 @@ import seedImages from "./imageSeeder";
 import seedItems from "./itemSeeder";
 
 const seed = async () => {
+  let exitCode = 0;
+
   try {
-    // Limpia y vuelve a crear las tablas
+    console.log("🔄 Desactivando FOREIGN_KEY_CHECKS y sincronizando esquemas...");
+
+    // Desactivar validación de claves foráneas para poder dropear en cualquier orden
+    await sequelize.query("SET FOREIGN_KEY_CHECKS = 0;");
+
+    // Limpia y vuelve a crear las tablas según los modelos
     await sequelize.sync({ force: true });
+
+    // Volver a activar las claves foráneas
+    await sequelize.query("SET FOREIGN_KEY_CHECKS = 1;");
+
+    console.log("✅ Tablas recreadas. Ejecutando seeders...");
 
     // Orden recomendado por FK
     await seedRoles();
@@ -22,10 +34,13 @@ const seed = async () => {
     await seedItems();
 
     console.log("✅ Seed completado exitosamente");
-    process.exit(0);
   } catch (error) {
+    exitCode = 1;
     console.error("❌ Error al ejecutar seed:", (error as Error).message);
-    process.exit(1);
+  } finally {
+    // Cerrar la conexión a la base antes de salir
+    await sequelize.close();
+    process.exit(exitCode);
   }
 };
 

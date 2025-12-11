@@ -2,9 +2,8 @@ export interface CreateUserDto {
   name: string;
   lastName: string;
   email: string;
-  cel: string;
+  cel?: string | null;
   roleId: number;
-  password: string;        // <- requerido
 }
 
 export interface UpdateUserDto {

@@ -11,8 +11,8 @@ type AuthTokenPayload = {
   roleId: number;
   name: string;
   lastName: string;
+  subdomain: string | null;   // ✔ ahora permite null
 };
-
 
 export const googleSync = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -29,7 +29,6 @@ export const googleSync = async (req: Request, res: Response, next: NextFunction
     
     if (user) {
       console.log('Usuario encontrado:', user.email);
-      // Usuario ya existe, usar el existente
     } else {
       // Crear nuevo usuario desde Google
       console.log('Creando nuevo usuario desde Google:', email);
@@ -39,8 +38,8 @@ export const googleSync = async (req: Request, res: Response, next: NextFunction
           name,
           lastName,
           email,
-          cel: cel || '',
-          roleId: 2, // rol por defecto - ajustar según tu lógica
+          cel: cel || "",
+          roleId: 2,
         });
       } catch (createError) {
         console.error('Error creando usuario de Google:', createError);
@@ -48,13 +47,14 @@ export const googleSync = async (req: Request, res: Response, next: NextFunction
       }
     }
     
-    // Generar token usando la misma estructura que login
+    // Generar token
     const payload: AuthTokenPayload = {
-      sub: String(user.id),  
+      sub: String(user.id),
       email: user.email,
       roleId: user.roleId,
       name: user.name,
       lastName: user.lastName,
+      subdomain: user.subdomain ?? null,    // ✔ FIX
     };
     
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: EXPIRES_IN });
@@ -87,18 +87,17 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     }
 
     email = email.trim().toLowerCase();
-    const pwd = password.trim();                                  // 👈 TRIM
+    const pwd = password.trim();
 
-    // Traer usuario sin filtrar por active para diferenciar casos
+    // Traer usuario
     const user = await userService.getUserByEmailForAuth(email);
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
-    // Si está inactivo, devolver mensaje específico
     if (!user.active) {
-      return res.status(403).json({ message: "USER_INACTIVE" }); // 👈
+      return res.status(403).json({ message: "USER_INACTIVE" });
     }
 
-    const valid = await user.validatePassword(pwd);               // verifica contra hash
+    const valid = await user.validatePassword(pwd);
     if (!valid) return res.status(401).json({ message: "Invalid credentials" });
 
     const payload: AuthTokenPayload = {
@@ -107,7 +106,9 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       roleId: user.roleId,
       name: user.name,
       lastName: user.lastName,
+      subdomain: user.subdomain ?? null,    // ✔ FIX
     };
+
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: EXPIRES_IN });
 
     return res.json({
@@ -121,10 +122,10 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         cel: user.cel,
         roleId: user.roleId,
         active: user.active,
+        subdomain: user.subdomain,
       },
     });
   } catch (err) {
     next(err);
   }
 };
-

@@ -5,6 +5,7 @@ import { Menu as MenuA } from "./Menu";
 import { Category as CategoryA } from "./Category";
 import { Image as ImageA } from "./Image";
 import { Item as ItemA } from "./Item";
+import ItemImage from "./ItemImage";
 
 export const setupAssociations = () => {
 
@@ -16,18 +17,18 @@ export const setupAssociations = () => {
   User.hasMany(Payment, { foreignKey: "userId", as: "payments" });
   Payment.belongsTo(User, { foreignKey: "userId", as: "user" });
 
-  MenuA.hasMany(CategoryA, { foreignKey: "menuId", as: "categories" });
-  CategoryA.belongsTo(MenuA, { foreignKey: "menuId", as: "menu" });
+  MenuA.hasMany(CategoryA, { foreignKey: "menuId", as: "categories", onDelete: "CASCADE", hooks: true });
+  CategoryA.belongsTo(MenuA, { foreignKey: "menuId", as: "menu", onDelete: "CASCADE" });
 
 
   MenuA.hasMany(ImageA, { foreignKey: "menuId", as: "images" });
   ImageA.belongsTo(MenuA, { foreignKey: "menuId", as: "menu" });
 
 
-  CategoryA.hasMany(ItemA, { foreignKey: "categoryId", as: "items" });
-  ItemA.belongsTo(CategoryA, { foreignKey: "categoryId", as: "category" });
+  CategoryA.hasMany(ItemA, { foreignKey: "categoryId", as: "items", onDelete: "CASCADE", hooks: true });
+  ItemA.belongsTo(CategoryA, { foreignKey: "categoryId", as: "category", onDelete: "CASCADE" });
 
-
-  ImageA.hasMany(ItemA, { foreignKey: "imageId", as: "items" });
-  ItemA.belongsTo(ImageA, { foreignKey: "imageId", as: "image" });
+  // Item 1–N ItemImage
+  ItemA.hasMany(ItemImage, { as: "images", foreignKey: "itemId", onDelete: "CASCADE", hooks: true,});
+  ItemImage.belongsTo(ItemA, { as: "item", foreignKey: "itemId" });
 };

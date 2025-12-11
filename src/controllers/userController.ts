@@ -51,7 +51,8 @@ export const createUser = async (
 ) => {
   try {
     const user = await userService.createUser(req.body); // password requerido en DTO
-    res.status(201).json(user);
+    const payload = user.toJSON();
+    res.status(201).json({ ...payload, subdomain: user.subdomain });
   } catch (error) {
     next(error);
   }
@@ -79,6 +80,20 @@ export const deleteUser = async (
   try {
     const id = parseId(req);
     const result = await userService.deleteUser(id);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const activateUser = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const id = parseId(req);
+    const result = await userService.activateUser(id);
     res.json(result);
   } catch (error) {
     next(error);

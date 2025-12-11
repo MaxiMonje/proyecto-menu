@@ -7,7 +7,8 @@ import {
   verifyResetToken,
   deleteUser,
   forgotPassword,
-  restorePassword
+  restorePassword,
+  activateUser
 } from "../controllers/userController";
 import { isAuthenticated } from "../middlewares/isAuthenticated";
 import { validate } from "../middlewares/validate";
@@ -25,7 +26,8 @@ router.get("/:id", isAuthenticated,getUserById);
 
 router.post("/", validate(createUserSchema), createUser);
 router.put("/:id",  validate(updateUserSchema), updateUser);
-router.delete("/:id", isAuthenticated,deleteUser);
+router.delete("/:id", deleteUser);
+router.post("/:id/activate",  activateUser);
 
 
 router.post("/forgot-password", validate(forgotPasswordSchema), forgotPassword);
